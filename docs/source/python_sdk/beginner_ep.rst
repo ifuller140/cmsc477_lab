@@ -31,7 +31,8 @@ __________________
   以及默认的通讯方式（udp通讯）对机器人进行初始化，在本示例中我们手动指定机器人的连接方式为组网模式,
   不指定通讯方式使用默认配置::
 
-    ep_robot.initialize(conn_type="sta")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+
 
 ..
 

@@ -20,12 +20,13 @@ from robomaster import robot
 
 if __name__ == '__main__':
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="sta")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+
 
     ep_chassis = ep_robot.chassis
 
-    x_val = 0.5
-    y_val = 0.3
+    x_val = 1
+    y_val = 1
     z_val = 30
 
     # 前进 3秒

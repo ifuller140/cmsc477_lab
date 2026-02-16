@@ -21,7 +21,7 @@ from robomaster import config
 if __name__ == '__main__':
     ep_robot = robot.Robot()
     # 指定机器人的 SN 号
-    ep_robot.initialize(conn_type="sta", sn="3JKDH2T001ULTD")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
 
     ep_version = ep_robot.get_version()
     print("Robot Version: {0}".format(ep_version))

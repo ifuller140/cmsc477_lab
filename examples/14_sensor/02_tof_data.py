@@ -26,7 +26,8 @@ def sub_data_handler(sub_info):
 
 if __name__ == '__main__':
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="sta")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+
 
     ep_sensor = ep_robot.sensor
     ep_sensor.sub_distance(freq=5, callback=sub_data_handler)

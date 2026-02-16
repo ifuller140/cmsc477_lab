@@ -20,17 +20,20 @@ from robomaster import robot
 
 if __name__ == '__main__':
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="sta")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+
 
     ep_arm = ep_robot.robotic_arm
 
     # 向前移动20毫米
-    ep_arm.move(x=20, y=0).wait_for_completed()
+    ep_arm.move(x=-40, y=-40).wait_for_completed()
     # 向后移动20毫米
-    ep_arm.move(x=-20, y=0).wait_for_completed()
+    #ep_arm.move(x=-40, y=0).wait_for_completed()
+    
+    # ep_arm.move(x=40, y=40).wait_for_completed()
     # 向上移动20毫米
-    ep_arm.move(x=0, y=20).wait_for_completed()
+    # ep_arm.move(x=0, y=20).wait_for_completed()
     # 向下移动20毫米
-    ep_arm.move(x=0, y=-20).wait_for_completed()
+    # ep_arm.move(x=0, y=-20).wait_for_completed()
 
     ep_robot.close()

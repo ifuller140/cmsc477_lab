@@ -32,7 +32,8 @@ def hit_callback(sub_info, ep_robot):
 
 if __name__ == '__main__':
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="ap")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+
 
     ep_armor = ep_robot.armor
 

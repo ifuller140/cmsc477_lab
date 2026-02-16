@@ -16,17 +16,19 @@
 
 import cv2
 from robomaster import robot
+import robomaster
 
 
 if __name__ == '__main__':
+    robomaster.config.ROBOT_IP_STRING = "192.168.50.116"
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="sta")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
 
     ep_camera = ep_robot.camera
 
     # 显示200帧图传
     ep_camera.start_video_stream(display=False)
-    for i in range(0, 200):
+    for i in range(0, 2000):
         img = ep_camera.read_cv2_image()
         cv2.imshow("Robot", img)
         cv2.waitKey(1)

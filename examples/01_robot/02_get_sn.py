@@ -19,7 +19,8 @@ from robomaster import robot
 
 if __name__ == '__main__':
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="sta")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+
 
     SN = ep_robot.get_sn()
     print("Robot SN:", SN)
