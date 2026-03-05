@@ -1,6 +1,5 @@
 import csv
 import os
-import time
 
 class Point:
     def __init__(self):
@@ -8,17 +7,29 @@ class Point:
         self.cost = 0
         self.trips = float('inf')
         self.visited = False
+        self.previous = None
         
-def print_map(points):
-    for r, row in enumerate(grid):
-        for c, val in enumerate(row):
-            point = points[(r, c)]
-            if point.dist_from_start == float('inf'):
-                print("  ∞  ", end="")
-            else:
-                print(f"{int(point.dist_from_start):4}", end=" ")
-        print()
-    print("\n" + "-" * 30 + "\n")
+# def draw_map_dist(points):
+#     for r, row in enumerate(grid):
+#         for c, val in enumerate(row):
+#             point = points[(r, c)]
+#             if point.dist_from_start == float('inf'):
+#                 print("  ∞  ", end="")
+#             else:
+#                 print(f"{int(point.dist_from_start):4}", end=" ")
+#         print()
+#     print("\n" + "-" * 30 + "\n")
+
+# def draw_map_trips(points):
+#     for r, row in enumerate(grid):
+#         for c, val in enumerate(row):
+#             point = points[(r, c)]
+#             if point.trips == float('inf'):
+#                 print("  ∞  ", end="")
+#             else:
+#                 print(f"{int(point.trips):4}", end=" ")
+#         print()
+#     print("\n" + "-" * 30 + "\n")
             
 
 def define_grid():
@@ -37,21 +48,33 @@ def find_value(target_val):
 
 def find_neighbors(x,y, points):
     neighbors = []
-    for i in range(3):
-        if (x-1, y-1+i) in points:
-            neighbors.append(points[(x-1,y-1 + i)])
+    if (x-1, y) in points:
+        neighbors.append(points[(x-1,y)])
     if (x, y-1) in points:            
         neighbors.append(points[(x, y-1)])
     if (x, y+1) in points:
         neighbors.append(points[(x, y+1)])
-    for i in range(3):
-        if (x+1, y-1+i) in points:
-            neighbors.append(points[(x+1,y-1 + i)])
+    if (x+1, y) in points:
+        neighbors.append(points[(x+1,y)])
     return neighbors
 
+def make_path(points, start, fin):
+    path = []
+    curr = fin
+    path.append(curr)
+    while True:
+        if curr == start:
+            break
+        path.append(points[curr[0], curr[1]].previous)
+        curr = points[curr[0], curr[1]].previous
+    path.reverse()
+    path_rebased = [(r+1, c+1) for r, c in path]
+    print(path_rebased)
+
+
 def dijkstra():
-    start = find_value(2)
-    fin = find_value(3)
+    start = tuple(find_value(2))
+    fin = tuple(find_value(3))
 
 
     points = {}
@@ -62,8 +85,10 @@ def dijkstra():
             points[(r,c)].cost = val
             unvisited.append(points[(r,c)])
 
-    points[start[0], start[1]].dist_from_start = 0
-    points[start[0], start[1]].trips = 0
+    points[start].dist_from_start = 0
+    points[start].trips = 0
+    points[start].cost = 0
+    points[fin].cost = 0
 
     while True:
         points_unvisited = []
@@ -76,7 +101,7 @@ def dijkstra():
                 break   
 
         current = min(points_unvisited, key=lambda p: points[p].dist_from_start)
-
+        
         if points[current].dist_from_start == float('inf'):
                         break
 
@@ -85,16 +110,19 @@ def dijkstra():
         curr_dist = points[current].dist_from_start
         curr_trips = points[current].trips
 
-        print(current)
         for n in find_neighbors(curr_x, curr_y, points):
             if n.visited == False:
                 if n.dist_from_start > curr_dist + n.cost:
                     n.dist_from_start = curr_dist + n.cost
+                    n.trips = curr_trips + 1
+                    n.previous = current
                 elif n.dist_from_start == curr_dist + n.cost:
                     if n.trips > curr_trips + 1:
                         n.trips = curr_trips + 1
-
-    print_map(points)
+                        n.previous = current
+    # draw_map_dist(points)
+    # draw_map_trips(points)
+    make_path(points, start, fin)
 
 
 

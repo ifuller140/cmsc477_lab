@@ -13,12 +13,9 @@ from typing import List, Tuple, Optional, Dict
 Coord = Tuple[int, int]
 
 def load_grid(csv_path: Optional[str] = None) -> List[List[int]]:
-    if csv_path is None:
-        files = glob.glob("*.csv")
-        if not files:
-            raise FileNotFoundError("No CSV file found in current folder.")
-        csv_path = files[0]
-    with open(csv_path, newline='') as f:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(base_dir, 'Weighted_Map.csv')
+    with open(file_path, newline='') as f:
         reader = csv.reader(f)
         grid = [[int(cell) for cell in row] for row in reader]
     return grid
