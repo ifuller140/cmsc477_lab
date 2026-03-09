@@ -69,7 +69,20 @@ def make_path(points, start, fin):
         curr = points[curr[0], curr[1]].previous
     path.reverse()
     path_rebased = [(r+1, c+1) for r, c in path]
-    print(path_rebased)
+    return(path_rebased)
+
+def redefine_coords(grid, path):
+    col_num = []
+    for r, row in enumerate(grid):
+        for c, val in enumerate(row):
+             col_num.append(c)
+    col_num = int(len(col_num)/len(row))
+    path_redefined = [(col_num - 4 - (r-1), c - 4) for r, c in path]
+    total_cell_length = 0.266
+    specific_cell_length = total_cell_length/3
+    path_mm = [(c*specific_cell_length, r*specific_cell_length, ) for r, c in path_redefined]
+    return path_mm
+    
 
 
 def dijkstra():
@@ -122,13 +135,16 @@ def dijkstra():
                         n.previous = current
     # draw_map_dist(points)
     # draw_map_trips(points)
-    make_path(points, start, fin)
-
+    path = make_path(points, start, fin)
+    return path
 
 
         
 
 if __name__ == "__main__":
     grid = define_grid()
-    dijkstra()
+    path = dijkstra()
+    path_mm = redefine_coords(grid, path)
+    print(path_mm)
+
 
