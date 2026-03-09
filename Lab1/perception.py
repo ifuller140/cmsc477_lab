@@ -5,6 +5,8 @@ import time
 import math
 import traceback
 from queue import Empty
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 import robomaster
 from robomaster import robot
@@ -84,7 +86,7 @@ def get_pose_apriltag_in_camera_frame(detection):
     transform_camera_apriltag = np.eye(4)
     transform_camera_apriltag[:3, :3] = rotation_camera_apriltag
     transform_camera_apriltag[:3, 3] = translation_camera_apriltag
-    return transformation_camera_apriltag
+    return transform_camera_apriltag
 
 def calculate_robot_world_pose(transformation_camera_apriltag, tag_id):
     if tag_id not in TAG_MAP:
@@ -132,7 +134,77 @@ def draw_detections(frame, detections):
         center = tuple(detection.center.astype(int))
         cv2.putText(frame, str(detection.tag_id), center, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
 
+def init_plot():
+    plt.ion()
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.set_xlim(-0.2, 3.2) 
+    ax.set_ylim(-0.2, 2.8)
+    ax.set_aspect('equal')
+    ax.grid(True, which='both', color='lightgray', linestyle='-', linewidth=1)
+    
+    ticks = np.arange(0, 3.2, 0.266)
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+    
+    # Draw walls (Gray)
+    wall1 = patches.Rectangle((0.532, 1.064), 0.266, 1.33, facecolor='gray', edgecolor='dimgray')
+    wall2 = patches.Rectangle((0.532, 2.128), 1.862, 0.266, facecolor='gray', edgecolor='dimgray')
+    wall3 = patches.Rectangle((2.128, 1.064), 0.266, 1.33, facecolor='gray', edgecolor='dimgray')
+    wall4 = patches.Rectangle((1.330, 0.0), 0.266, 1.33, facecolor='gray', edgecolor='dimgray')
+    ax.add_patch(wall1)
+    ax.add_patch(wall2)
+    ax.add_patch(wall3)
+    ax.add_patch(wall4)
+    
+    # Draw Start and Goal
+    start_box = patches.Rectangle((0.0, 1.330), 0.266, 0.266, facecolor='lawngreen', edgecolor='gray')
+    goal_box = patches.Rectangle((2.66, 1.330), 0.266, 0.266, facecolor='orangered', edgecolor='gray')
+    ax.add_patch(start_box)
+    ax.add_patch(goal_box)
+    
+    # Draw Tags
+    for tag_id, (x, y, yaw) in TAG_MAP.items():
+        tw, th = 0.08, 0.08
+        tx, ty = x, y
+        if yaw == 0:   tx -= tw/2
+        elif yaw == 180: tx += tw/2
+        elif yaw == 90:  ty += th/2
+        elif yaw == 270: ty -= th/2
+        
+        tag_rect = patches.Rectangle((tx - tw/2, ty - th/2), tw, th, facecolor='black')
+        ax.add_patch(tag_rect)
+        
+        txt_x, txt_y = x, y
+        if yaw == 0:   txt_x += 0.07
+        elif yaw == 180: txt_x -= 0.07 
+        elif yaw == 90:  txt_y -= 0.07
+        elif yaw == 270: txt_y += 0.07
+        
+        ax.text(txt_x, txt_y, str(tag_id), color='black', fontsize=9, ha='center', va='center', fontweight='bold')
+        
+    robot_dot, = ax.plot([], [], 'C0o', markersize=14, zorder=5) # Robot position
+    robot_line, = ax.plot([], [], 'C0-', linewidth=3, zorder=4) # Robot heading
+    
+    plt.title("Live AprilTag Maze Localization")
+    plt.show(block=False)
+    
+    return fig, ax, robot_dot, robot_line
+
+def update_plot(fig, robot_dot, robot_line, x, y, yaw_deg):
+    robot_dot.set_data([x], [y])
+    
+    rad = math.radians(yaw_deg)
+    end_x = x + 0.15 * math.cos(rad)
+    end_y = y + 0.15 * math.sin(rad)
+    robot_line.set_data([x, end_x], [y, end_y])
+    
+    fig.canvas.flush_events()
+
 def detect_tag_loop(ep_camera, detector):
+    
+    fig, ax, robot_dot, robot_line = init_plot()
     
     # main loop to detect tags and perform localization
     while True:
@@ -187,6 +259,8 @@ def detect_tag_loop(ep_camera, detector):
             
             # print the localization data
             print(f"[Live Localization] X: {avg_x:7.3f} m | Y: {avg_y:7.3f} m | Yaw: {avg_yaw:7.2f}° | Tags used: {len(cluster)}/{len(poses)}           ", end='\r')
+            
+            update_plot(fig, robot_dot, robot_line, avg_x, avg_y, avg_yaw)
         else:
             # if there are tags found but none of them can be mapped, or no tags seen
             print(f"[Live Localization] Searching for valid tags...                                                       ", end='\r')
