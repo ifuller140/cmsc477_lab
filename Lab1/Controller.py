@@ -4,16 +4,27 @@ import time
 
 #inputs: next target coordinate, robot x y orientation
 #output: 
+speed = 0.25
+angSpeedThres = 90
 
-
-
-def calculateVelocity (targetCoord, targetYaw, robotPose, robotYaw):
-    diffX = targetCoord[0] - robotPose[0]
-    diffY = targetCoord[1] - robotPose[1]
+def calculateVelocity (targetCoord, targetYaw, robotCoord, robotYaw):
+    diffX = targetCoord[0] - robotCoord[0]
+    diffY = targetCoord[1] - robotCoord[1]
+    
     direction = np.array([diffX, diffY])
     direction = direction / np.linalg.norm(direction) * speed
+
     XYspeeds = convertRobotFrame(direction, orientationVector(robotYaw))
-    
+    angularSpeed = calculateAngVel(targetYaw, robotYaw)
+
+    XYspeeds = (1 - angularSpeed/angSpeedThres) * XYspeeds
+
+    return [XYspeeds[0], XYspeeds[1], angularSpeed]
+
+def calculateAngVel (targetYaw, robotYaw):
+    kP = 0.5
+    error = targetYaw - robotYaw
+    return kP * error
     
 
 #project desired global vector into robot's xy components
@@ -61,15 +72,18 @@ if __name__ == '__main__':
     ep_robot = robot.Robot()
     ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
 
-    speed = 0.5
-
     ep_chassis = ep_robot.chassis
 
-    desiredVector = np.array([-0.2,-0.4])
-    wheelSpeeds = convertRobotFrame(desiredVector, orientationVector(135))
+    robotCoord = [0,0]
+    robotYaw = 45
+    targetCoord = [1,0]
+    targetYaw = 45
+
+    #desiredVector = np.array([-0.2,-0.4])
+    wheelSpeeds = calculateVelocity(targetCoord, targetYaw, robotCoord, robotYaw)
 
     print(wheelSpeeds)
-    ep_chassis.drive_speed(wheelSpeeds[0], wheelSpeeds[1], z=0, timeout=5)
+    ep_chassis.drive_speed(wheelSpeeds[0], wheelSpeeds[1], wheelSpeeds[2], timeout=5)
     #ep_chassis.drive_speed(0, 0.4, 0, timeout = 5)
     time.sleep(2)
     ep_chassis.drive_speed(x=0, y=0, z=0, timeout=5)
