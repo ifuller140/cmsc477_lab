@@ -10,7 +10,7 @@ angSpeedThres = 90
 def calculateVelocity (targetCoord, targetYaw, robotCoord, robotYaw):
     diffX = targetCoord[0] - robotCoord[0]
     diffY = targetCoord[1] - robotCoord[1]
-    
+
     direction = np.array([diffX, diffY])
     direction = direction / np.linalg.norm(direction) * speed
 
@@ -24,7 +24,9 @@ def calculateVelocity (targetCoord, targetYaw, robotCoord, robotYaw):
 def calculateAngVel (targetYaw, robotYaw):
     kP = 0.5
     error = targetYaw - robotYaw
-    return kP * error
+    if error > 180:
+        error = error - 180
+    return - kP * error
     
 
 #project desired global vector into robot's xy components
@@ -74,10 +76,12 @@ if __name__ == '__main__':
 
     ep_chassis = ep_robot.chassis
 
-    robotCoord = [0,0]
+
+
+    robotCoord = [1,0]
     robotYaw = 45
     targetCoord = [1,0]
-    targetYaw = 45
+    targetYaw = 90
 
     #desiredVector = np.array([-0.2,-0.4])
     wheelSpeeds = calculateVelocity(targetCoord, targetYaw, robotCoord, robotYaw)
