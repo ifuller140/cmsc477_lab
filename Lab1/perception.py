@@ -21,7 +21,7 @@ TAG_MAP = {
     32: (0.532, 1.463, 180.0),
     33: (0.798, 1.463, 0.0),
     34: (0.665, 1.064, 90.0),
-    35: (1.463, 2.128, 90),
+    35: (1.197, 2.128, 90),
     36: (1.729, 2.128, 90),
     37: (1.463, 1.330, 270.0),
     38: (1.330, 0.931, 180.0),
@@ -134,7 +134,7 @@ def draw_detections(frame, detections):
         center = tuple(detection.center.astype(int))
         cv2.putText(frame, str(detection.tag_id), center, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
 
-# make the maze plot 
+# start the maze plot 
 def init_plot():
     plt.ion()
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -187,11 +187,13 @@ def init_plot():
         
     robot_dot, = ax.plot([], [], 'C0o', markersize=14, zorder=5) # Robot position
     robot_line, = ax.plot([], [], 'C0-', linewidth=3, zorder=4) # Robot heading
+    path_line, = ax.plot([], [], 'g--', linewidth=2, zorder=3)
+    target_dot, = ax.plot([], [], 'mo', markersize=10, zorder=6)
     
     plt.title("Live AprilTag Maze Localization")
     plt.show(block=False)
     
-    return fig, ax, robot_dot, robot_line
+    return fig, ax, robot_dot, robot_line, path_line, target_dot
 
 def update_plot(fig, robot_dot, robot_line, x, y, yaw_deg):
     robot_dot.set_data([x], [y])
@@ -203,67 +205,64 @@ def update_plot(fig, robot_dot, robot_line, x, y, yaw_deg):
     
     fig.canvas.flush_events()
 
-def detect_tag_loop(ep_camera, detector):
+def get_localization(ep_camera, detector, img_out=False):
+    try:
+        img = ep_camera.read_cv2_image(strategy="newest", timeout=0.1)
+    except Empty:
+        return (None, None) if img_out else None
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    fig, ax, robot_dot, robot_line = init_plot()
+    detections = detector.detect(gray, estimate_tag_pose=True,
+        camera_params=[314.0, 314.0, 320.0, 180.0], tag_size=0.153)
+
+    draw_detections(img, detections)
+    
+    poses = []        
+    if len(detections) > 0:
+        for detection in detections:
+            transform_camera_apriltag = get_pose_apriltag_in_camera_frame(detection)
+            pose = calculate_robot_world_pose(transform_camera_apriltag, detection.tag_id)
+            if pose is not None:
+                poses.append(pose)
+                info_str = f"R_W(X:{pose[0]:.2f}, Y:{pose[1]:.2f})"
+                center = tuple(detection.center.astype(int))
+                cv2.putText(img, info_str, (center[0] - 60, center[1] + 25), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    if poses:
+        poses.sort(key=lambda p: p[3]) 
+        best_pose = poses[0]
+        cluster = [best_pose]
+        for p in poses[1:]:
+            if math.hypot(p[0] - best_pose[0], p[1] - best_pose[1]) < 0.3:
+                cluster.append(p)
+        avg_x = sum(p[0] for p in cluster) / len(cluster)
+        avg_y = sum(p[1] for p in cluster) / len(cluster)
+        sum_sin = sum(math.sin(math.radians(p[2])) for p in cluster)
+        sum_cos = sum(math.cos(math.radians(p[2])) for p in cluster)
+        avg_yaw = math.degrees(math.atan2(sum_sin, sum_cos))
+        
+        if img_out: return (avg_x, avg_y, avg_yaw), img
+        return (avg_x, avg_y, avg_yaw)
+
+    if img_out: return None, img
+    return None
+
+def detect_tag_loop(ep_camera, detector):
+    fig, ax, robot_dot, robot_line, path_line, target_dot = init_plot()
     
     # main loop to detect tags and perform localization
     while True:
-        try:
-            img = ep_camera.read_cv2_image(strategy="newest", timeout=0.5)
-        except Empty:
+        pose, img = get_localization(ep_camera, detector, img_out=True)
+        if img is None:
             time.sleep(0.001)
             continue
-
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
-        detections = detector.detect(gray, estimate_tag_pose=True,
-            camera_params=[314.0, 314.0, 320.0, 180.0], tag_size=0.153)
-
-        draw_detections(img, detections)
-        
-        poses = []        
-        if len(detections) > 0:
-            for detection in detections:
-                transformation_camera_apriltag = get_pose_apriltag_in_camera_frame(detection)
-                pose = calculate_robot_world_pose(transformation_camera_apriltag, detection.tag_id)
-                if pose is not None:
-                    poses.append(pose)
-                    
-                    # draw individual perceived location text near the tag
-                    # this massively helps for debugging speciifc tags in the maze
-                    info_str = f"R_W(X:{pose[0]:.2f}, Y:{pose[1]:.2f})"
-                    center = tuple(detection.center.astype(int))
-                    cv2.putText(img, info_str, (center[0] - 60, center[1] + 25), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-         
-        if poses: # if we get multiple april tags in view then we want to average the poses
-            poses.sort(key=lambda p: p[3]) # sort by distance to tag since the closest tag is usually most accurate
             
-            best_pose = poses[0]
-            cluster = [best_pose]
-            
-            # only add other tags if they are within 0.3 meters of the closest tag's estimate
-            for p in poses[1:]:
-                if math.hypot(p[0] - best_pose[0], p[1] - best_pose[1]) < 0.3:
-                    cluster.append(p)
-            
-            # average teh translation of the poses
-            avg_x = sum(p[0] for p in cluster) / len(cluster)
-            avg_y = sum(p[1] for p in cluster) / len(cluster)
-            
-            # average the yaw of the poses which also has to account for jumps between -180 and 180 degrees
-            sum_sin = sum(math.sin(math.radians(p[2])) for p in cluster)
-            sum_cos = sum(math.cos(math.radians(p[2])) for p in cluster)
-            avg_yaw = math.degrees(math.atan2(sum_sin, sum_cos))
-            
-            # print the localization data
-            print(f"[Live Localization] X: {avg_x:7.3f} m | Y: {avg_y:7.3f} m | Yaw: {avg_yaw:7.2f}° | Tags used: {len(cluster)}/{len(poses)}           ", end='\r')
-            
-            update_plot(fig, robot_dot, robot_line, avg_x, avg_y, avg_yaw)
+        if pose is not None:
+            print(f"[Live Localization] X: {pose[0]:7.3f} m | Y: {pose[1]:7.3f} m | Yaw: {pose[2]:7.2f}°       ", end='\r')
+            update_plot(fig, robot_dot, robot_line, pose[0], pose[1], pose[2])
         else:
-            # if there are tags found but none of them can be mapped, or no tags seen
             print(f"[Live Localization] Searching for valid tags...                                                       ", end='\r')
 
         cv2.imshow("Robot View", img)
@@ -277,7 +276,7 @@ if __name__ == '__main__':
     np.set_printoptions(precision=3, suppress=True, linewidth=120)
 
     # connect to correct robot IP
-    robomaster.config.ROBOT_IP_STRING = "192.168.50.116"
+    robomaster.config.ROBOT_IP_STR = "192.168.50.116"
     ep_robot = robot.Robot()
     
     print("Connecting to robot...")
