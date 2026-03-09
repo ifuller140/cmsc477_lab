@@ -65,7 +65,7 @@ def get_transform_world_apriltag(x, y, yaw_deg):
     
     # Tag Z points INTO the tag (away from outward normal) -> Z = [-cos(-yaw), -sin(-yaw), 0]
     # Tag Y points DOWN -> Y = [0, 0, -1]
-    # Tag X = Y x Z -> X = [-sin(-yaw), cos(-yaw), 0]
+    # Tag X = Y * Z -> X = [-sin(-yaw), cos(-yaw), 0]
     rotation_world_apriltag = np.array([
         [-math.sin(rad),  0, -math.cos(rad)],
         [ math.cos(rad),  0, -math.sin(rad)],
@@ -116,7 +116,7 @@ def calculate_robot_world_pose(transformation_camera_apriltag, tag_id):
 
     return robot_x, robot_y, robot_yaw, dist_to_tag
 
-# Draw the detections on the frame
+# draw the april tagdetections on the frame
 def draw_detections(frame, detections):
     for detection in detections:
         pts = detection.corners.reshape((-1, 1, 2)).astype(np.int32)
@@ -130,10 +130,11 @@ def draw_detections(frame, detections):
         cv2.line(frame, top_left, bottom_right, color=(0, 0, 255), thickness=2)
         cv2.line(frame, top_right, bottom_left, color=(0, 0, 255), thickness=2)
         
-        # Draw tag ID
+        # add the tag ID
         center = tuple(detection.center.astype(int))
         cv2.putText(frame, str(detection.tag_id), center, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
 
+# make the maze plot 
 def init_plot():
     plt.ion()
     fig, ax = plt.subplots(figsize=(8, 8))
