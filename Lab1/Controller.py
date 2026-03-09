@@ -3,7 +3,8 @@ import numpy as np
 import time
 
 #inputs: next target coordinate, robot x y orientation
-#output: 
+#output: x, y, z speeds
+
 speed = 0.25
 angSpeedThres = 90
 
@@ -20,7 +21,9 @@ def calculateVelocity (targetCoord, targetYaw, robotCoord, robotYaw):
 
         XYspeeds = convertRobotFrame(direction, orientationVector(robotYaw))
 
+        #scale down the translation based on angular velocity
         XYspeeds = (1 - angularSpeed/angSpeedThres) * XYspeeds
+
         return [XYspeeds[0], XYspeeds[1], angularSpeed]
     
     return [0,0,angularSpeed]
@@ -29,7 +32,9 @@ def calculateAngVel (targetYaw, robotYaw):
     kP = 0.5
     error = targetYaw - robotYaw
     if error > 180:
-        error = error - 180
+        error = error - 360
+    elif error < -180:
+        error = error + 360
     return - kP * error
     
 
@@ -83,9 +88,9 @@ if __name__ == '__main__':
 
 
     robotCoord = [1,0]
-    robotYaw = 45
+    robotYaw = 300
     targetCoord = [1,0]
-    targetYaw = 90
+    targetYaw = 45
 
     #desiredVector = np.array([-0.2,-0.4])
     wheelSpeeds = calculateVelocity(targetCoord, targetYaw, robotCoord, robotYaw)
