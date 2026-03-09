@@ -11,15 +11,19 @@ def calculateVelocity (targetCoord, targetYaw, robotCoord, robotYaw):
     diffX = targetCoord[0] - robotCoord[0]
     diffY = targetCoord[1] - robotCoord[1]
 
-    direction = np.array([diffX, diffY])
-    direction = direction / np.linalg.norm(direction) * speed
-
-    XYspeeds = convertRobotFrame(direction, orientationVector(robotYaw))
     angularSpeed = calculateAngVel(targetYaw, robotYaw)
 
-    XYspeeds = (1 - angularSpeed/angSpeedThres) * XYspeeds
+    if diffX != 0 and diffY != 0:
 
-    return [XYspeeds[0], XYspeeds[1], angularSpeed]
+        direction = np.array([diffX, diffY])
+        direction = direction / np.linalg.norm(direction) * speed
+
+        XYspeeds = convertRobotFrame(direction, orientationVector(robotYaw))
+
+        XYspeeds = (1 - angularSpeed/angSpeedThres) * XYspeeds
+        return [XYspeeds[0], XYspeeds[1], angularSpeed]
+    
+    return [0,0,angularSpeed]
 
 def calculateAngVel (targetYaw, robotYaw):
     kP = 0.5
