@@ -80,7 +80,8 @@ if __name__ == '__main__':
                 # if tags have been completely lost for over half a second, start rotating physically to search
                 if time.time() - last_seen_time > 0.5:
                     print(f"Rotate to find AprilTags...         ", end='\r')
-                    Controller.search_for_tags(ep_chassis)
+                    # Controller.search_for_tags(ep_chassis)
+                    Controller.stop(ep_chassis) # disabled search for now
                 else:
                     # minor dropouts, just coast
                     Controller.stop(ep_chassis)
@@ -106,7 +107,8 @@ if __name__ == '__main__':
                 continue
 
             # calculate required yaw to face the targeted (X,Y) graph point
-            target_yaw = math.degrees(math.atan2(target_y - robot_y, target_x - robot_x))
+            # target_yaw = math.degrees(math.atan2(target_y - robot_y, target_x - robot_x))
+            target_yaw = 0 # disabled yaw for now
 
             # execute drive via custom Controller (calculates velocity and sends commands)
             Controller.move_towards_target(ep_chassis, [target_x, target_y], target_yaw, [robot_x, robot_y], robot_yaw)

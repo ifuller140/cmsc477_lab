@@ -12,7 +12,8 @@ def calculateVelocity (targetCoord, targetYaw, robotCoord, robotYaw):
     diffX = targetCoord[0] - robotCoord[0]
     diffY = targetCoord[1] - robotCoord[1]
 
-    angularSpeed = calculateAngVel(targetYaw, robotYaw)
+    # angularSpeed = calculateAngVel(targetYaw, robotYaw)
+    angularSpeed = 0 # disabled for now
 
     if diffX != 0 or diffY != 0:
 
@@ -22,7 +23,7 @@ def calculateVelocity (targetCoord, targetYaw, robotCoord, robotYaw):
         XYspeeds = convertRobotFrame(direction, orientationVector(robotYaw))
 
         #scale down the translation based on angular velocity
-        XYspeeds = (1 - angularSpeed/angSpeedThres) * XYspeeds
+        # XYspeeds = (1 - angularSpeed/angSpeedThres) * XYspeeds
 
         return [XYspeeds[0], XYspeeds[1], angularSpeed]
     
