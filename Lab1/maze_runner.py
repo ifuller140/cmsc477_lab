@@ -97,10 +97,10 @@ if __name__ == '__main__':
             
             # check if reached target
             dist_to_target = math.hypot(target_x - robot_x, target_y - robot_y)
-            if dist_to_target < 0.15: # 15cm threshold
+            if dist_to_target < 0.3: #threshold
                 print(f"Reached waypoint {current_target_index}/{len(calculated_path)}, selecting next...")
                 # we decided to skip 2 tiny grid waypoints (~18cm) ahead at a time to prevent stuttering speeds
-                current_target_index += 2 
+                current_target_index += 1 
                 if current_target_index >= len(calculated_path):
                     print("Reached the Final Goal!")
                     break

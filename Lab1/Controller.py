@@ -5,7 +5,7 @@ import time
 #inputs: next target coordinate, robot x y orientation
 #output: x, y, z speeds
 
-speed = 0.25
+speed = 0.1
 angSpeedThres = 90
 
 def calculateVelocity (targetCoord, targetYaw, robotCoord, robotYaw):
@@ -18,7 +18,7 @@ def calculateVelocity (targetCoord, targetYaw, robotCoord, robotYaw):
     if diffX != 0 or diffY != 0:
 
         direction = np.array([diffX, diffY])
-        direction = direction / np.linalg.norm(direction) * speed
+        direction = direction / np.linalg.norm(direction) * speed 
 
         XYspeeds = convertRobotFrame(direction, orientationVector(robotYaw))
 
@@ -91,7 +91,7 @@ def move_towards_target(ep_chassis, targetCoord, targetYaw, robotCoord, robotYaw
     print("robot moving...")
     
     # execute drive_speed 
-    ep_chassis.drive_speed(x=speeds[0], y=speeds[1], z=speeds[2], timeout=0.5)
+    ep_chassis.drive_speed(x=speeds[0], y=speeds[1] * -1, z=speeds[2], timeout=0.5) # I negated Y here!!
 
 if __name__ == '__main__':
     pass
