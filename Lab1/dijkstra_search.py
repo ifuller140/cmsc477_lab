@@ -34,7 +34,7 @@ class Point:
 
 def define_grid():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    file_path = os.path.join(base_dir, 'Weighted_Map.csv')
+    file_path = os.path.join(base_dir, 'Weighted_Map_2.csv')
     with open(file_path) as f:
         reader = csv.reader(f)
         grid = [[int(cell) for cell in row] for row in reader]
