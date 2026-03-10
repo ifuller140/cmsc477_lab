@@ -62,14 +62,6 @@ if __name__ == '__main__':
         while current_target_index < len(calculated_path):
             # grab the next target x,y location
             target = calculated_path[current_target_index]
-            
-            # select current target index
-            for index in range(current_target_index, len(calculated_path)):
-                target_x, target_y = calculated_path[index]
-                target = (target_x, target_y)
-                current_target_index = index
-                break
-                
             target_x, target_y = target
             target_dot.set_data([target_x], [target_y])
 
@@ -87,12 +79,11 @@ if __name__ == '__main__':
             if pose is None:
                 # if tags have been completely lost for over half a second, start rotating physically to search
                 if time.time() - last_seen_time > 0.5:
-                    print(f"Localizing... rotating to find AprilTags...         ", end='\r')
-                    # rotate clockwise at 30 deg/s to scan 
-                    ep_chassis.drive_speed(x=0, y=0, z=-30, timeout=0.1) 
+                    print(f"Rotate to find AprilTags...         ", end='\r')
+                    Controller.search_for_tags(ep_chassis)
                 else:
                     # minor dropouts, just coast
-                    ep_chassis.drive_speed(x=0, y=0, z=0, timeout=0.1)
+                    Controller.stop(ep_chassis)
                 time.sleep(0.05)
                 continue
                 
@@ -107,7 +98,7 @@ if __name__ == '__main__':
             dist_to_target = math.hypot(target_x - robot_x, target_y - robot_y)
             if dist_to_target < 0.15: # 15cm threshold
                 print(f"Reached waypoint {current_target_index}/{len(calculated_path)}, selecting next...")
-                # we decided to skip 2 tiny grid waypoints (~26cm) ahead at a time to prevent stuttering speeds
+                # we decided to skip 2 tiny grid waypoints (~18cm) ahead at a time to prevent stuttering speeds
                 current_target_index += 2 
                 if current_target_index >= len(calculated_path):
                     print("Reached the Final Goal!")
@@ -117,13 +108,9 @@ if __name__ == '__main__':
             # calculate required yaw to face the targeted (X,Y) graph point
             target_yaw = math.degrees(math.atan2(target_y - robot_y, target_x - robot_x))
 
-            # grab appropriate wheel speeds from the custom Controller
-            speeds = Controller.calculateVelocity([target_x, target_y], target_yaw, [robot_x, robot_y], robot_yaw)
-            
-            # execute drive_speed safely, clear wheel buffers manually to prevent stacking conflicts
-            ep_chassis.drive_wheels(w1=0, w2=0, w3=0, w4=0)
-            ep_chassis.drive_speed(x=speeds[0], y=speeds[1], z=speeds[2], timeout=0.5)
-            
+            # execute drive via custom Controller (calculates velocity and sends commands)
+            Controller.move_towards_target(ep_chassis, [target_x, target_y], target_yaw, [robot_x, robot_y], robot_yaw)
+
             # keep loop slightly bottlenecked to allow robot processing
             time.sleep(0.05)
 
@@ -135,8 +122,10 @@ if __name__ == '__main__':
         aborted = True
     finally:
         print("\nMaze run finished. Shutting down safely...")
-        ep_chassis.drive_wheels(w1=0, w2=0, w3=0, w4=0)
-        ep_chassis.drive_speed(x=0, y=0, z=0, timeout=1.0)
+        try:
+            Controller.stop(ep_chassis)
+        except:
+            pass
         ep_camera.stop_video_stream()
         ep_robot.close()
         cv2.destroyAllWindows()
