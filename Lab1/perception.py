@@ -190,7 +190,6 @@ def init_plot():
     path_line, = ax.plot([], [], 'g--', linewidth=2, zorder=3)
     target_dot, = ax.plot([], [], 'mo', markersize=10, zorder=6)
     
-    
     plt.title("Live AprilTag Maze Localization")
     plt.show(block=False)
     
@@ -198,7 +197,6 @@ def init_plot():
 
 def update_plot(fig, robot_dot, robot_line, x, y, yaw_deg):
     robot_dot.set_data([x], [y])
-    
     rad = math.radians(yaw_deg)
     end_x = x + 0.15 * math.cos(rad)
     end_y = y + 0.15 * math.sin(rad)

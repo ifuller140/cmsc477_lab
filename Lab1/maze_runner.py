@@ -22,10 +22,10 @@ if __name__ == '__main__':
         grid_path = dijkstra()
         calculated_path = redefine_coords(dijkstra_search.grid, grid_path)
     except Exception as e:
-        print(f"Failed to find graph path: {e}")
+        print(f"Couldn't find graph path: {e}")
         exit(1)
         
-    print(f"Found path with {len(calculated_path)} waypoints.")
+    print(f"Found path with {len(calculated_path)} wayppointsoints.")
 
     # connect to the RoboMaster chassis and camera
     robomaster.config.ROBOT_IP_STR = "192.168.50.116"
@@ -78,6 +78,7 @@ if __name__ == '__main__':
                 if time.time() - last_seen_time > 1:
                     print(f"Rotating to find aprilTags", end='\r')
                     Controller.search_for_tags(ep_chassis)
+                    time.sleep(0.25)
                     Controller.stop(ep_chassis)
                 else:
                     # minor dropouts, just coast
@@ -97,7 +98,7 @@ if __name__ == '__main__':
             if dist_to_target < 0.2: # threshold
                 print(f"Reached point {current_target_index}/{len(calculated_path)}, going to next point")
                 current_target_index += 1 
-                print(current_target_index)
+                # print(current_target_index)
                 if current_target_index >= len(calculated_path):
                     print("----- We solved the maze!! Woohoo! -----")
                     break

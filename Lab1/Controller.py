@@ -81,7 +81,7 @@ def orientationVector (robotYaw):
     return np.array([unitX, unitY])
 
 def search_for_tags(ep_chassis):
-    ep_chassis.drive_speed(x=0, y=0, z=-30, timeout=0.5)
+    ep_chassis.drive_speed(x=0, y=0, z=20, timeout=0.5)
 
 def stop(ep_chassis):
     ep_chassis.drive_speed(x=0, y=0, z=0, timeout=0.5)
