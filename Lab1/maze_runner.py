@@ -7,12 +7,9 @@ import matplotlib.pyplot as plt
 import robomaster
 from robomaster import robot, camera
 
-# Import custom lab scripts
+# import all our lab1 files
 from dijkstra_search import define_grid, dijkstra, redefine_coords
-# import our perception system
 import perception
-
-# import our controller
 import Controller
 
 if __name__ == '__main__':
@@ -98,17 +95,24 @@ if __name__ == '__main__':
             # check if reached target
             dist_to_target = math.hypot(target_x - robot_x, target_y - robot_y)
             if dist_to_target < 0.3: #threshold
-                print(f"Reached waypoint {current_target_index}/{len(calculated_path)}, selecting next...")
-                # we decided to skip 2 tiny grid waypoints (~18cm) ahead at a time to prevent stuttering speeds
+                print(f"Reached point {current_target_index}/{len(calculated_path)}, going to next point")
                 current_target_index += 1 
                 if current_target_index >= len(calculated_path):
                     print("Reached the Final Goal!")
                     break
                 continue
 
-            # calculate required yaw to face the targeted (X,Y) graph point
-            # target_yaw = math.degrees(math.atan2(target_y - robot_y, target_x - robot_x))
-            target_yaw = 0 # disabled yaw for now
+            target_yaw = 0 # default yaw
+
+            # add manual turn points for the robot to always see the april tags throughout the maze
+            if current_target_index == 15:
+                target_yaw = -90
+            elif current_target_index == 25:
+                target_yaw = 0
+            elif current_target_index == 30:
+                target_yaw = -90
+            elif current_target_index == 35:
+                target_yaw = 180
 
             # execute drive via custom Controller (calculates velocity and sends commands)
             Controller.move_towards_target(ep_chassis, [target_x, target_y], target_yaw, [robot_x, robot_y], robot_yaw)
