@@ -74,18 +74,18 @@ if __name__ == '__main__':
                     
             # check localization status
             if pose is None:
-                # if tags have been completely lost for over half a second, start rotating physically to search
-                if time.time() - last_seen_time > 0.5:
-                    print(f"Rotate to find AprilTags...         ", end='\r')
-                    # Controller.search_for_tags(ep_chassis)
-                    Controller.stop(ep_chassis) # disabled search for now
+                # if tags have been completely lost for over a second, start rotating physically to search
+                if time.time() - last_seen_time > 1:
+                    print(f"Rotating to find aprilTags", end='\r')
+                    Controller.search_for_tags(ep_chassis)
+                    Controller.stop(ep_chassis)
                 else:
                     # minor dropouts, just coast
                     Controller.stop(ep_chassis)
                 time.sleep(0.05)
                 continue
                 
-            # successfully localized
+            # after successfully localized
             last_seen_time = time.time()
             robot_x, robot_y, robot_yaw = pose
             
@@ -94,40 +94,42 @@ if __name__ == '__main__':
             
             # check if reached target
             dist_to_target = math.hypot(target_x - robot_x, target_y - robot_y)
-            if dist_to_target < 0.3: #threshold
+            if dist_to_target < 0.2: # threshold
                 print(f"Reached point {current_target_index}/{len(calculated_path)}, going to next point")
                 current_target_index += 1 
+                print(current_target_index)
                 if current_target_index >= len(calculated_path):
-                    print("Reached the Final Goal!")
+                    print("----- We solved the maze!! Woohoo! -----")
                     break
                 continue
 
-            target_yaw = 0 # default yaw
+            target_yaw = 0 # starting yaw
 
             # add manual turn points for the robot to always see the april tags throughout the maze
-            if current_target_index == 15:
+            if current_target_index > 10:
+                target_yaw = -45
+            if current_target_index > 20:
                 target_yaw = -90
-            elif current_target_index == 25:
-                target_yaw = 0
-            elif current_target_index == 30:
-                target_yaw = -90
-            elif current_target_index == 35:
-                target_yaw = 180
+            if current_target_index > 30:
+                target_yaw = -135
+            if current_target_index > 58:
+                target_yaw = -180
 
             # execute drive via custom Controller (calculates velocity and sends commands)
             Controller.move_towards_target(ep_chassis, [target_x, target_y], target_yaw, [robot_x, robot_y], robot_yaw)
 
-            # keep loop slightly bottlenecked to allow robot processing
+            # keeps the main loop slightly slower to allow robot for processing
             time.sleep(0.05)
 
+    # catches keyboard interruptions and errors
     except KeyboardInterrupt:
-        print("\nCTRL+C caught. Stopping...")
+        print("\n----Stopping----")
         aborted = True
     except Exception as e:
-        print(f"\nError encountered: {e}")
+        print(f"\nError: {e}")
         aborted = True
     finally:
-        print("\nMaze run finished. Shutting down safely...")
+        print("\nMaze run finished!!")
         try:
             Controller.stop(ep_chassis)
         except:
@@ -137,7 +139,7 @@ if __name__ == '__main__':
         cv2.destroyAllWindows()
         
         if not aborted:
-            # keep plot open at the end so we can see the path traveled
+            # keeps the plot open at the end so we can see the path traveled
             plt.ioff()
             plt.show()
         else:

@@ -12,8 +12,8 @@ def calculateVelocity (targetCoord, targetYaw, robotCoord, robotYaw):
     diffX = targetCoord[0] - robotCoord[0]
     diffY = targetCoord[1] - robotCoord[1]
 
-    # angularSpeed = calculateAngVel(targetYaw, robotYaw)
-    angularSpeed = 0 # disabled for now
+    angularSpeed = calculateAngVel(targetYaw, robotYaw)
+    # angularSpeed = 0 # disabled for now
 
     if diffX != 0 or diffY != 0:
 
@@ -23,7 +23,7 @@ def calculateVelocity (targetCoord, targetYaw, robotCoord, robotYaw):
         XYspeeds = convertRobotFrame(direction, orientationVector(robotYaw))
 
         #scale down the translation based on angular velocity
-        # XYspeeds = (1 - angularSpeed/angSpeedThres) * XYspeeds
+        XYspeeds = (1 - angularSpeed/angSpeedThres) * XYspeeds
 
         return [XYspeeds[0], XYspeeds[1], angularSpeed]
     
@@ -31,7 +31,10 @@ def calculateVelocity (targetCoord, targetYaw, robotCoord, robotYaw):
 
 def calculateAngVel (targetYaw, robotYaw):
     kP = 0.5
-    error = targetYaw - robotYaw
+    error = targetYaw + robotYaw
+    #print(f"target yaw: {targetYaw}")
+    #print(f"robot yaw: {robotYaw}")
+
     if error > 180:
         error = error - 360
     elif error < -180:
@@ -85,10 +88,10 @@ def stop(ep_chassis):
 
 def move_towards_target(ep_chassis, targetCoord, targetYaw, robotCoord, robotYaw):
     speeds = calculateVelocity(targetCoord, targetYaw, robotCoord, robotYaw)
-    print(f"speeds: {speeds}")
-    print(f"robot position: {robotCoord}")
-    print(f"robot yaw: {robotYaw:.2f}")
-    print("robot moving...")
+    #print(f"speeds: {speeds}")
+    #print(f"robot position: {robotCoord}")
+    #print(f"robot yaw: {robotYaw:.2f}")
+    #print("robot moving...")
     
     # execute drive_speed 
     ep_chassis.drive_speed(x=speeds[0], y=speeds[1] * -1, z=speeds[2], timeout=0.5) # I negated Y here!!

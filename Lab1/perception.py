@@ -190,6 +190,7 @@ def init_plot():
     path_line, = ax.plot([], [], 'g--', linewidth=2, zorder=3)
     target_dot, = ax.plot([], [], 'mo', markersize=10, zorder=6)
     
+    
     plt.title("Live AprilTag Maze Localization")
     plt.show(block=False)
     
