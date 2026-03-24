@@ -41,7 +41,7 @@ if __name__ == '__main__':
     # initialize the perception system
     import pupil_apriltags
     detector = pupil_apriltags.Detector(families="tag36h11", nthreads=2)
-    fig, ax, robot_dot, robot_line, path_line, target_dot = perception.init_plot()
+    fig, ax, robot_dot, robot_line, path_line, target_dot, actual_robot_path = perception.init_plot()
     
     # plot the full generated Dijkstra trajectory onto the map
     px = [p[0] for p in calculated_path]
@@ -91,7 +91,7 @@ if __name__ == '__main__':
             robot_x, robot_y, robot_yaw = pose
             
             # update live map plot
-            perception.update_plot(fig, robot_dot, robot_line, robot_x, robot_y, robot_yaw)
+            perception.update_plot(fig, robot_dot, robot_line, robot_x, robot_y, robot_yaw, actual_robot_path)
             
             # check if reached target
             dist_to_target = math.hypot(target_x - robot_x, target_y - robot_y)
@@ -109,11 +109,11 @@ if __name__ == '__main__':
             # add manual turn points for the robot to always see the april tags throughout the maze
             if current_target_index > 10:
                 target_yaw = -45
-            if current_target_index > 20:
+            if current_target_index > 25:
                 target_yaw = -90
-            if current_target_index > 30:
+            if current_target_index > 35:
                 target_yaw = -135
-            if current_target_index > 58:
+            if current_target_index > 70:
                 target_yaw = -180
 
             # execute drive via custom Controller (calculates velocity and sends commands)
