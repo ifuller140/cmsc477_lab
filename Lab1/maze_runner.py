@@ -10,11 +10,11 @@ from robomaster import robot, camera
 # import all our lab1 files
 from dijkstra_search import define_grid, dijkstra, redefine_coords
 import perception
-import Controller
+import controller
 
 if __name__ == '__main__':
     # first find the path using Dijkstra
-    print("Planning path with Dijkstra's algorithm...")
+    print("Planning path with Dijkstra's algorithm")
     
     try:
         import dijkstra_search
@@ -25,7 +25,7 @@ if __name__ == '__main__':
         print(f"Couldn't find graph path: {e}")
         exit(1)
         
-    print(f"Found path with {len(calculated_path)} wayppointsoints.")
+    print(f"Found path with {len(calculated_path)} wayppointsoints")
 
     # connect to the RoboMaster chassis and camera
     robomaster.config.ROBOT_IP_STR = "192.168.50.116"
@@ -47,7 +47,7 @@ if __name__ == '__main__':
     px = [p[0] for p in calculated_path]
     py = [p[1] for p in calculated_path]
     path_line.set_data(px, py)
-    fig.canvas.flush_events()
+    fig.canvas.flush_events() 
 
     # maze running loop
     current_target_index = 0

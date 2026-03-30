@@ -1,9 +1,8 @@
 build
 dist
 
-*.png
-
 src/robomaster.egg-info
 
 __pycache__
 *.DS_STORE
+examples/01_robot/qrcode.png
