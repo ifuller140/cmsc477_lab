@@ -28,7 +28,7 @@ if __name__ == '__main__':
 
     # 显示200帧图传
     ep_camera.start_video_stream(display=False)
-    for i in range(0, 2000):
+    for i in range(0, 200):
         img = ep_camera.read_cv2_image()
         cv2.imshow("Robot", img)
         cv2.waitKey(1)
