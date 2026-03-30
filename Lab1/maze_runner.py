@@ -7,12 +7,9 @@ import matplotlib.pyplot as plt
 import robomaster
 from robomaster import robot, camera
 
-# Import custom lab scripts
+# import all our lab1 files
 from dijkstra_search import define_grid, dijkstra, redefine_coords
-# import our perception system
 import perception
-
-# import our controller
 import Controller
 
 if __name__ == '__main__':
@@ -25,10 +22,10 @@ if __name__ == '__main__':
         grid_path = dijkstra()
         calculated_path = redefine_coords(dijkstra_search.grid, grid_path)
     except Exception as e:
-        print(f"Failed to find graph path: {e}")
+        print(f"Couldn't find graph path: {e}")
         exit(1)
         
-    print(f"Found path with {len(calculated_path)} waypoints.")
+    print(f"Found path with {len(calculated_path)} wayppointsoints.")
 
     # connect to the RoboMaster chassis and camera
     robomaster.config.ROBOT_IP_STR = "192.168.50.116"
@@ -44,7 +41,7 @@ if __name__ == '__main__':
     # initialize the perception system
     import pupil_apriltags
     detector = pupil_apriltags.Detector(families="tag36h11", nthreads=2)
-    fig, ax, robot_dot, robot_line, path_line, target_dot = perception.init_plot()
+    fig, ax, robot_dot, robot_line, path_line, target_dot, actual_robot_path = perception.init_plot()
     
     # plot the full generated Dijkstra trajectory onto the map
     px = [p[0] for p in calculated_path]
@@ -77,53 +74,63 @@ if __name__ == '__main__':
                     
             # check localization status
             if pose is None:
-                # if tags have been completely lost for over half a second, start rotating physically to search
-                if time.time() - last_seen_time > 0.5:
-                    print(f"Rotate to find AprilTags...         ", end='\r')
-                    # Controller.search_for_tags(ep_chassis)
-                    Controller.stop(ep_chassis) # disabled search for now
+                # if tags have been completely lost for over a second, start rotating physically to search
+                if time.time() - last_seen_time > 1:
+                    print(f"Rotating to find aprilTags", end='\r')
+                    Controller.search_for_tags(ep_chassis)
+                    time.sleep(0.25)
+                    Controller.stop(ep_chassis)
                 else:
                     # minor dropouts, just coast
                     Controller.stop(ep_chassis)
                 time.sleep(0.05)
                 continue
                 
-            # successfully localized
+            # after successfully localized
             last_seen_time = time.time()
             robot_x, robot_y, robot_yaw = pose
             
             # update live map plot
-            perception.update_plot(fig, robot_dot, robot_line, robot_x, robot_y, robot_yaw)
+            perception.update_plot(fig, robot_dot, robot_line, robot_x, robot_y, robot_yaw, actual_robot_path)
             
             # check if reached target
             dist_to_target = math.hypot(target_x - robot_x, target_y - robot_y)
-            if dist_to_target < 0.15: # 15cm threshold
-                print(f"Reached waypoint {current_target_index}/{len(calculated_path)}, selecting next...")
-                # we decided to skip 2 tiny grid waypoints (~18cm) ahead at a time to prevent stuttering speeds
-                current_target_index += 2 
+            if dist_to_target < 0.2: # threshold
+                print(f"Reached point {current_target_index}/{len(calculated_path)}, going to next point")
+                current_target_index += 1 
+                # print(current_target_index)
                 if current_target_index >= len(calculated_path):
-                    print("Reached the Final Goal!")
+                    print("----- We solved the maze!! Woohoo! -----")
                     break
                 continue
 
-            # calculate required yaw to face the targeted (X,Y) graph point
-            # target_yaw = math.degrees(math.atan2(target_y - robot_y, target_x - robot_x))
-            target_yaw = 0 # disabled yaw for now
+            target_yaw = 0 # starting yaw
+
+            # add manual turn points for the robot to always see the april tags throughout the maze
+            if current_target_index > 10:
+                target_yaw = -45
+            if current_target_index > 25:
+                target_yaw = -90
+            if current_target_index > 35:
+                target_yaw = -135
+            if current_target_index > 70:
+                target_yaw = -180
 
             # execute drive via custom Controller (calculates velocity and sends commands)
             Controller.move_towards_target(ep_chassis, [target_x, target_y], target_yaw, [robot_x, robot_y], robot_yaw)
 
-            # keep loop slightly bottlenecked to allow robot processing
+            # keeps the main loop slightly slower to allow robot for processing
             time.sleep(0.05)
 
+    # catches keyboard interruptions and errors
     except KeyboardInterrupt:
-        print("\nCTRL+C caught. Stopping...")
+        print("\n----Stopping----")
         aborted = True
     except Exception as e:
-        print(f"\nError encountered: {e}")
+        print(f"\nError: {e}")
         aborted = True
     finally:
-        print("\nMaze run finished. Shutting down safely...")
+        print("\nMaze run finished!!")
         try:
             Controller.stop(ep_chassis)
         except:
@@ -133,7 +140,7 @@ if __name__ == '__main__':
         cv2.destroyAllWindows()
         
         if not aborted:
-            # keep plot open at the end so we can see the path traveled
+            # keeps the plot open at the end so we can see the path traveled
             plt.ioff()
             plt.show()
         else:

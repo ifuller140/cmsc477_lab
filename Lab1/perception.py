@@ -189,19 +189,20 @@ def init_plot():
     robot_line, = ax.plot([], [], 'C0-', linewidth=3, zorder=4) # Robot heading
     path_line, = ax.plot([], [], 'g--', linewidth=2, zorder=3)
     target_dot, = ax.plot([], [], 'mo', markersize=10, zorder=6)
+    actual_robot_path, = ax.plot([], [], 'r.', markersize=4, zorder=3)
     
     plt.title("Live AprilTag Maze Localization")
     plt.show(block=False)
     
-    return fig, ax, robot_dot, robot_line, path_line, target_dot
+    return fig, ax, robot_dot, robot_line, path_line, target_dot, actual_robot_path
 
-def update_plot(fig, robot_dot, robot_line, x, y, yaw_deg):
+def update_plot(fig, robot_dot, robot_line, x, y, yaw_deg, actual_robot_path):
     robot_dot.set_data([x], [y])
-    
     rad = math.radians(yaw_deg)
     end_x = x + 0.15 * math.cos(rad)
     end_y = y + 0.15 * math.sin(rad)
     robot_line.set_data([x, end_x], [y, end_y])
+    actual_robot_path.set_data(list(actual_robot_path.get_xdata()) + [x], list(actual_robot_path.get_ydata()) + [y])
     
     fig.canvas.flush_events()
 
@@ -250,7 +251,7 @@ def get_localization(ep_camera, detector, img_out=False):
     return None
 
 def detect_tag_loop(ep_camera, detector):
-    fig, ax, robot_dot, robot_line, path_line, target_dot = init_plot()
+    fig, ax, robot_dot, robot_line, path_line, target_dot, actual_robot_path = init_plot()
     
     # main loop to detect tags and perform localization
     while True:
@@ -261,7 +262,7 @@ def detect_tag_loop(ep_camera, detector):
             
         if pose is not None:
             print(f"[Live Localization] X: {pose[0]:7.3f} m | Y: {pose[1]:7.3f} m | Yaw: {pose[2]:7.2f}°       ", end='\r')
-            update_plot(fig, robot_dot, robot_line, pose[0], pose[1], pose[2])
+            update_plot(fig, robot_dot, robot_line, pose[0], pose[1], pose[2], actual_robot_path)
         else:
             print(f"[Live Localization] Searching for valid tags...                                                       ", end='\r')
 
