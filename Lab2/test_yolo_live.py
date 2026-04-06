@@ -1,19 +1,25 @@
 import cv2
+import os
 import time
 from ultralytics import YOLO
+import robomaster
 from robomaster import robot
 from robomaster import camera
 
 def main():
     print('Loading YOLO model...')
-    model = YOLO("cmsc477_yolo/runs/detect/lego_gpu_train3/weights/best.pt")
+    file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cmsc477_yolo/runs/detect/lego_gpu_train3/weights/best.pt")
+    model = YOLO(file_path)
 
     print('Connecting to RoboMaster...')
+    robomaster.config.ROBOT_IP_STRING = "192.168.50.116"
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="ap")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
     
     ep_camera = ep_robot.camera
     ep_camera.start_video_stream(display=False, resolution=camera.STREAM_360P)
+
+    ep_arm = ep_robot.robotic_arm
 
     print('Starting live feed. Press "q" to quit.')
     try:
