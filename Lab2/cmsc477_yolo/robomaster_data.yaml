@@ -1,0 +1,5 @@
+path: ./datasets
+train: robomaster_train
+val: robomaster_validation
+nc: 1
+names: ["robomaster"]

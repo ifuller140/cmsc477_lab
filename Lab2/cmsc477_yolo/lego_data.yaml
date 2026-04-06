@@ -1,0 +1,5 @@
+path: ./datasets 
+train: lego_train
+val: lego_validation
+nc: 1
+names: ["lego"]
