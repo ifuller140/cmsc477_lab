@@ -59,24 +59,24 @@ def main():
                     # Proportional control for yaw (z-axis rotation)
                     # Robomaster: positive z is turn left. 
                     # If target is to the right (cx > center), error is positive, we want turn right (negative z)
-                    yaw_speed = -error_x * 0.15 
+                    yaw_speed = error_x * 0.15 
                     
                     # Clamp yaw speed
                     yaw_speed = max(-40.0, min(40.0, yaw_speed)) 
                     
                     # Proportional control for forward (x-axis)
-                    if height < TARGET_HEIGHT:
+                    if xyxy[1] < 140:
                         # Approach speed proportional to distance (inversely proportional to height)
                         # We use a constant slow speed instead for safety
-                        forward_speed = 0.15 
+                        forward_speed = 0.10 
                     else:
                         # Too close, stop
                         forward_speed = 0.0
                         
                     ep_chassis.drive_speed(x=forward_speed, y=0.0, z=yaw_speed)
                     
-                    status_text = f"Spd: {forward_speed:.2f} Yaw: {yaw_speed:.2f} Err: {error_x:.1f} H: {height:.1f}"
-                    cv2.putText(frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+                    status_text = f"Spd: {forward_speed:.2f} Yaw: {yaw_speed:.2f} Err: {error_x:.1f} H: {xyxy[1]:.1f}"
+                    cv2.putText(frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
                     
                 else:
                     # Stop if no object detected
