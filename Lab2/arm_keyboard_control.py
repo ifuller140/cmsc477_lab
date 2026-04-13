@@ -9,6 +9,12 @@
 #   RIGHT -> extend arm forward (x +)
 #   LEFT  -> retract arm back   (x -)
 #
+# WASD Keys:
+#   w -> move chassis forward
+#   s -> move chassis backward
+#   a -> move chassis left
+#   d -> move chassis right
+#
 # Letter Keys:
 #   o -> open gripper
 #   c -> close gripper
@@ -29,6 +35,9 @@ ROBOT_SN   = "3JKCH8800100VW"
 MOVE_STEP      = 20    # mm per key press
 GRIPPER_POWER  = 60    # gripper strength (0-100)
 GRIPPER_HOLD   = 1.0   # seconds to hold before pausing
+
+CHASSIS_MOVE_STEP = 0.1 # meters per key press
+CHASSIS_XY_SPEED  = 0.5 # m/s
 
 # ── Platform-safe single-character keyboard read ─────────────────────────────
 try:
@@ -120,6 +129,12 @@ def print_help():
     print("    →  RIGHT - Extend arm FORWARD")
     print("    ←  LEFT  - Retract arm BACK")
     print()
+    print("  WASD Keys:")
+    print("    w        - Move chassis FWD")
+    print("    s        - Move chassis BACK")
+    print("    a        - Move chassis LEFT")
+    print("    d        - Move chassis RIGHT")
+    print()
     print("  Gripper (power = {}):".format(GRIPPER_POWER))
     print("    o        - Open gripper")
     print("    c        - Close gripper")
@@ -143,6 +158,7 @@ def main():
 
     ep_arm     = ep_robot.robotic_arm
     ep_gripper = ep_robot.gripper
+    ep_chassis = ep_robot.chassis
     gripper    = GripperController(ep_gripper)
 
     print_help()
@@ -167,6 +183,22 @@ def main():
             elif key == KEY_LEFT:
                 print(f"←  Arm BACK  (x -{MOVE_STEP} mm)")
                 ep_arm.move(x=-MOVE_STEP, y=0).wait_for_completed()
+
+            elif key.lower() == 'w':
+                print(f"w  Chassis FWD   (x +{CHASSIS_MOVE_STEP} m)")
+                ep_chassis.move(x=CHASSIS_MOVE_STEP, y=0, z=0, xy_speed=CHASSIS_XY_SPEED).wait_for_completed()
+
+            elif key.lower() == 's':
+                print(f"s  Chassis BACK  (x -{CHASSIS_MOVE_STEP} m)")
+                ep_chassis.move(x=-CHASSIS_MOVE_STEP, y=0, z=0, xy_speed=CHASSIS_XY_SPEED).wait_for_completed()
+
+            elif key.lower() == 'a':
+                print(f"a  Chassis LEFT  (y -{CHASSIS_MOVE_STEP} m)")
+                ep_chassis.move(x=0, y=-CHASSIS_MOVE_STEP, z=0, xy_speed=CHASSIS_XY_SPEED).wait_for_completed()
+
+            elif key.lower() == 'd':
+                print(f"d  Chassis RIGHT (y +{CHASSIS_MOVE_STEP} m)")
+                ep_chassis.move(x=0, y=CHASSIS_MOVE_STEP, z=0, xy_speed=CHASSIS_XY_SPEED).wait_for_completed()
 
             elif key.lower() == 'o':
                 print("  Gripper OPEN")
