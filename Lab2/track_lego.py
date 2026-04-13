@@ -111,7 +111,7 @@ def main():
                 error_x = cx - FRAME_CENTER_X
 
                 # Proportional yaw: positive z = turn left; invert so we chase the target
-                yaw_speed = -(error_x * 0.15)
+                yaw_speed = error_x * 0.15
                 yaw_speed = max(-40.0, min(40.0, yaw_speed))
 
                 # Forward speed: approach while the box top-edge (xyxy[1]) is high
