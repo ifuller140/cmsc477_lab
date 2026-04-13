@@ -65,7 +65,7 @@ def main():
                     yaw_speed = max(-40.0, min(40.0, yaw_speed)) 
                     
                     # Proportional control for forward (x-axis)
-                    if xyxy[1] < 140:
+                    if xyxy[1] < 140: # TODO: tune this value
                         # Approach speed proportional to distance (inversely proportional to height)
                         # We use a constant slow speed instead for safety
                         forward_speed = 0.10 
