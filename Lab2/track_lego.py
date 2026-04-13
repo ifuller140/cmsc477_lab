@@ -35,7 +35,16 @@ def main():
     ep_camera  = ep_robot.camera
     ep_arm     = ep_robot.robotic_arm
     ep_chassis = ep_robot.chassis
+    ep_gripper = ep_robot.gripper
 
+    # Move the arm to the "retracted" position
+    ep_robot.robotic_arm.moveto(x=185, y=-80).wait_for_completed()
+
+    # Open the gripper
+    ep_gripper.open(power=50)
+    time.sleep(1)
+    ep_gripper.pause()
+    
     try:
         ep_camera.start_video_stream(display=False, resolution=camera.STREAM_360P)
     except Exception as e:
@@ -186,6 +195,21 @@ def main():
                     display_available = False
             else:
                 time.sleep(0.03)
+
+        # ── After the boxes have been aligned ────────────────────────────────────────────
+        print("Aligned! Moving forward to grab object.")
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0) # stop any existing movement
+        
+        # Move forward by 0.1m
+        ep_chassis.move(x=0.1, y=0, z=0, xy_speed=0.5).wait_for_completed()
+        
+        # Close the gripper
+        ep_gripper.close(power=50)
+        time.sleep(1)
+        ep_gripper.pause()
+
+        # Move the arm 
+        ep_robot.robotic_arm.moveto(x=185, y=-60).wait_for_completed()
 
     except KeyboardInterrupt:
         print("\nKeyboard interrupt received.")
