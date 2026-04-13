@@ -1,6 +1,7 @@
 import time
 import math
 import random
+import robomaster
 from robomaster import robot
 
 class OdometryTester:
@@ -19,8 +20,9 @@ class OdometryTester:
         self.sdk_yaw = 0.0
         
         print("Initializing RoboMaster...")
+        robomaster.config.ROBOT_IP_STRING = "192.168.50.116"
         self.ep_robot = robot.Robot()
-        self.ep_robot.initialize(conn_type="ap")
+        self.ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
         self.chassis = self.ep_robot.chassis
         
         if self.mode == 3:
