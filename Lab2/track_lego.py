@@ -201,7 +201,7 @@ def main():
         ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0) # stop any existing movement
         
         # Move forward by 0.1m
-        ep_chassis.move(x=0.1, y=0, z=0, xy_speed=0.5).wait_for_completed()
+        ep_chassis.move(x=0.2, y=0, z=0, xy_speed=0.5).wait_for_completed()
         
         # Close the gripper
         ep_gripper.close(power=50)
