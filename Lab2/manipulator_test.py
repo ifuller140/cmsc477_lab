@@ -12,6 +12,8 @@ def sub_data_handler(sub_info):
     # You can use these values to confirm the robot arm is where it is supposed to be
     # It is also usable for determine the right setpoints to send to "moveto" commands
     print("Robotic Arm: pos x:{0}, pos y:{1}".format(pos_x, pos_y))
+    
+    return pos_x,pos_y
 
 if __name__ == '__main__':
     robomaster.config.ROBOT_IP_STRING = "192.168.50.116"
@@ -22,14 +24,45 @@ if __name__ == '__main__':
 
     # Start printing the gripper position
     ep_arm.sub_position(freq=5, callback=sub_data_handler)
-
+    time.sleep(1)
     # Open the gripper
-    #ep_gripper.open(power=50)
-    #time.sleep(1)
-    #ep_gripper.pause()
+    ep_gripper.open(power=50)
+    time.sleep(1)
+    ep_gripper.pause()
 
     # Move the arm to the "retracted" position
+#manipulatorPositions = {[185, -80], [175, 140], [], []}
+
+#190, -30 to 180 -30
+    ep_gripper.close(power=50)
+    time.sleep(1)
+    ep_gripper.pause()
+
+
+
     ep_robot.robotic_arm.moveto(x=185, y=-80).wait_for_completed()
+    ep_robot.robotic_arm.moveto(x=185, y=-80).wait_for_completed()
+    
+    ep_gripper.open(power=50)
+    time.sleep(1)
+    ep_gripper.pause()
+
+    ep_robot.robotic_arm.moveto(x=175, y=140).wait_for_completed()
+    ep_robot.robotic_arm.moveto(x=175, y=140).wait_for_completed()
+
+    ep_gripper.close(power=50)
+    time.sleep(1)
+    ep_gripper.pause()
+
+    ep_robot.robotic_arm.moveto(x=190, y=-50).wait_for_completed()
+    ep_robot.robotic_arm.moveto(x=190, y=-50).wait_for_completed()
+
+    ep_gripper.open(power=50)
+    time.sleep(1)
+    ep_gripper.pause()
+
+    ep_robot.robotic_arm.moveto(x=180, y=-50).wait_for_completed()
+    ep_robot.robotic_arm.moveto(x=180, y=-50).wait_for_completed()
 
     # Move the arm forward and down in order to pickup an object
     # (we do this in two moves to avoid the "keep out zone" where the robot may hit itself)
