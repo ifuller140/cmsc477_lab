@@ -10,21 +10,22 @@ from robomaster import robot, camera
 # Yaw / centering
 YAW_KP   = 0.15              # deg per horizontal pixel error
 YAW_MAX  = 40.0              # deg clamp
+FRAME_CX = 320
 
 # Forward proportional speed
 FWD_KP   = 0.0015            # m/s per pixel error
 FWD_MAX  = 0.20              # m/s clamp
 
 # Step 1 - initial approach stop condition
-APPROACH_STOP_BOTTOM = 300   # px: stop when bbox bottom reaches this row
+APPROACH_STOP_BOTTOM = 250   # px: stop when bbox bottom reaches this row
 
 # Step 2 - orbit
 ORBIT_STRAFE_SPEED  = 0.05   # m/s; positive y = strafe LEFT = CCW orbit when facing tower
 ORBIT_ALIGN_TOL     = 6      # px: T2 must be within this many px of frame centre
-SECONDARY_MAX_BOTTOM = 220   # px: far-tower bbox bottom must be above this (peeking over T1)
+SECONDARY_MAX_BOTTOM = 150   # px: far-tower bbox bottom must be above this (peeking over T1)
 
 # Step 3 - final approach and grab
-GRAB_TOP_THRESHOLD  = 70     # px: grab when bbox TOP edge (xyxy[1]) < this value
+GRAB_TOP_THRESHOLD  = 100     # px: grab when bbox TOP edge (xyxy[1]) > this value
 GRIPPER_POWER       = 50
 GRIPPER_HOLD        = 1.0    # s — hold after issuing open/close (must be ≤ 1 s)
 
@@ -220,6 +221,7 @@ def step1(ep_chassis, ep_camera, model):
             return
 
         err_y     = APPROACH_STOP_BOTTOM - t1['y2']
+        print(f'{err_y}')
         fwd_speed = max(0.0, min(FWD_MAX, err_y * FWD_KP))
         drive(ep_chassis, x=fwd_speed, y=0.0, z=yaw_speed)
 
@@ -311,7 +313,7 @@ def step3(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
         err_x     = t1['cx'] - FRAME_CX
         yaw_speed = max(-YAW_MAX, min(YAW_MAX, err_x * YAW_KP))
 
-        if t1['y1'] < GRAB_TOP_THRESHOLD:
+        if t1['y1'] > GRAB_TOP_THRESHOLD:
             stop(ep_chassis)
             write_text_on_video_feed(frame, f"Step 3 - GRAB  top={t1['y1']:.0f}", color=(0, 255, 255))
             show(frame)
@@ -322,7 +324,9 @@ def step3(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
             return
 
         err_y     = t1['y1'] - GRAB_TOP_THRESHOLD    # how much further to go
-        fwd_speed = max(0.0, min(FWD_MAX * 0.6, err_y * FWD_KP))
+        #fwd_speed = max(0.0, min(FWD_MAX * 0.6, err_y * FWD_KP))
+        fwd_speed = 0.1
+        #print(f'{fwd_speed}')
         drive(ep_chassis, x=fwd_speed, y=0.0, z=yaw_speed)
 
         write_text_on_video_feed(frame, f"Step 3 - fwd={fwd_speed:.2f}  yaw={yaw_speed:.1f}  top={t1['y1']:.0f}")
@@ -364,7 +368,7 @@ def step4(ep_chassis, ep_camera, model):
             continue
 
         no_detect = 0
-        t2 = valid[0] # largest valid bbox = T2
+        t2 = valid[1] # largest valid bbox = T2
         draw_box(frame, t2, color=(255, 120, 0), label="T2")
 
         # draw ignored scraps
@@ -553,13 +557,13 @@ def main():
 
         # ── 2. Orbit CCW until tower 2 is directly behind tower 1 ────────────
         step2(ep_chassis, ep_camera, model)
-
+        
         # ── 3. Final centred drive-in; grab tower 1 and lift ─────────────────
         step3(ep_chassis, ep_arm, ep_gripper, ep_camera, model)
-
+        
         # ── 4. Approach tower 2 while accumulating odometry ──────────────────
         step4_dist = step4(ep_chassis, ep_camera, model)
-
+        '''
         # ── 5. Physical swap manoeuvre (pure odometry) ────────────────────────
         swap_net = step5(ep_chassis, ep_arm, ep_gripper)
 
@@ -568,7 +572,7 @@ def main():
 
         # ── 7. Drive back to tower 1's spot and drop tower 2 ────────
         step7(ep_chassis, ep_arm, ep_gripper, step4_dist, swap_net, step6_dist)
-
+        '''
         print("\n Lego tower swap complete!")
 
     except KeyboardInterrupt:
