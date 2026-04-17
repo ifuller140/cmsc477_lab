@@ -7,6 +7,7 @@ import robomaster
 from robomaster import robot
 from robomaster import camera
 
+
 def main():
     # ── Load YOLO model ───────────────────────────────────────────────────────
     print('Loading YOLO model...')
@@ -34,7 +35,16 @@ def main():
     ep_camera  = ep_robot.camera
     ep_arm     = ep_robot.robotic_arm
     ep_chassis = ep_robot.chassis
+    ep_gripper = ep_robot.gripper
 
+    # Move the arm to the "retracted" position
+    ep_robot.robotic_arm.moveto(x=185, y=-80).wait_for_completed()
+
+    # Open the gripper
+    ep_gripper.open(power=50)
+    time.sleep(1)
+    ep_gripper.pause()
+    
     try:
         ep_camera.start_video_stream(display=False, resolution=camera.STREAM_360P)
     except Exception as e:
@@ -52,8 +62,10 @@ def main():
     # Check whether a display is available (headless Pi vs desktop)
     display_available = True
 
+    aligned = False
+
     try:
-        while True:
+        while not aligned:
             # ── Read frame ────────────────────────────────────────────────────
             try:
                 frame = ep_camera.read_cv2_image(strategy="newest", timeout=0.5)
@@ -109,23 +121,54 @@ def main():
 
                 # ── Control logic ─────────────────────────────────────────────
                 error_x = cx - FRAME_CENTER_X
+                error_y = 240 - xyxy[3]
 
                 # Proportional yaw: positive z = turn left; invert so we chase the target
-                yaw_speed = -(error_x * 0.15)
+                yaw_speed = error_x * 0.15
                 yaw_speed = max(-40.0, min(40.0, yaw_speed))
+
+                forward_speed = 0.0015 * error_y
+                forward_speed = max(-0.2, min(0.2, forward_speed))
+
+                #during orbit
+                if abs(error_y) < 10:
+                    sideways_speed = 0.05
+
+                    #sets target characteristics
+                    for b in boxes:
+                        target_xyxy = b.xyxy.cpu().numpy().flatten()
+                        
+                        if target_xyxy[3] < 220:
+                            target_width = target_xyxy[2]-target_xyxy[0]
+                            target_cx = target_xyxy[0] + target_width / 2.0
+                            cv2.rectangle(
+                                frame,
+                                (int(target_xyxy[0]), int(target_xyxy[1])),
+                                (int(target_xyxy[2]), int(target_xyxy[3])),
+                                color=(0, 255, 0), thickness=3
+                            )
+
+                            if abs(target_cx - FRAME_CENTER_X) < 6:
+                                aligned = True
+                                sideways_speed = 0.0
+
+
+                else:
+                    sideways_speed = 0.0
 
                 # Forward speed: approach while the box top-edge (xyxy[1]) is high
                 # in the frame (small value); stop when object fills lower portion
-                if xyxy[1] < 140:  # TODO: tune this value
-                    forward_speed = 0.10
-                else:
-                    forward_speed = 0.0
 
-                ep_chassis.drive_speed(x=forward_speed, y=0.0, z=yaw_speed)
+                # if xyxy[3] < 260:  # TODO: tune this value
+                #     forward_speed = 0.10
+                # else:
+                #     forward_speed = 0.0
+
+                ep_chassis.drive_speed(x=forward_speed, y=sideways_speed, z=yaw_speed)
 
                 status_text = (
-                    f"Spd: {forward_speed:.2f}  Yaw: {yaw_speed:.2f}"
-                    f"  Err: {error_x:.1f}  BoxTop: {xyxy[1]:.1f}"
+                    f"Spd: {forward_speed:.2f}  BoxBottom: {xyxy[3]:.2f}"
+                    f"  Err: {error_y:.1f}  SideSpd: {sideways_speed:.1f}"
                 )
                 cv2.putText(
                     frame, status_text, (10, 30),
@@ -152,6 +195,21 @@ def main():
                     display_available = False
             else:
                 time.sleep(0.03)
+
+        # ── After the boxes have been aligned ────────────────────────────────────────────
+        print("Aligned! Moving forward to grab object.")
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0) # stop any existing movement
+        
+        # Move forward by 0.1m
+        ep_chassis.move(x=0.2, y=0, z=0, xy_speed=0.5).wait_for_completed()
+        
+        # Close the gripper
+        ep_gripper.close(power=50)
+        time.sleep(1)
+        ep_gripper.pause()
+
+        # Move the arm 
+        ep_robot.robotic_arm.moveto(x=185, y=-60).wait_for_completed()
 
     except KeyboardInterrupt:
         print("\nKeyboard interrupt received.")
