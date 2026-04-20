@@ -9,12 +9,13 @@ from robomaster import robot, camera
 
 # Constants
 # Yaw / centering
-YAW_KP   = 0.15              # deg per horizontal pixel error
+YAW_KP   = 0.2              # deg per horizontal pixel error
 YAW_MAX  = 40.0              # deg clamp
 FRAME_CX = 320
 
 # Forward proportional speed
 FWD_KP   = 0.0015            # m/s per pixel error
+FWD_KP_ORBIT   = 0.0005            # m/s per pixel error
 FWD_MAX  = 0.20              # m/s clamp
 
 # Step 1 - initial approach stop condition
@@ -22,33 +23,39 @@ APPROACH_STOP_BOTTOM = 250   # px: stop when bbox bottom reaches this row
 
 # Step 2 - orbit
 ORBIT_STRAFE_SPEED  = 0.05   # m/s; positive y = strafe LEFT = CCW orbit when facing tower
-ORBIT_ALIGN_TOL     = 6      # px: T2 must be within this many px of frame centre
+ORBIT_ALIGN_TOL     = 8      # px: T2 must be within this many px of frame centre
 SECONDARY_MAX_BOTTOM = 150   # px: far-tower bbox bottom must be above this (peeking over T1)
 
 # Step 3 - final approach and grab
-GRAB_TOP_THRESHOLD  = 100     # px: grab when bbox TOP edge (xyxy[1]) > this value
+GRAB_TOP_THRESHOLD  = 95     # px: grab when bbox TOP edge (xyxy[1]) > this value
 GRIPPER_POWER       = 50
 GRIPPER_HOLD        = 1.0    # s — hold after issuing open/close (must be ≤ 1 s)
 
 # Step 4 - approach the second tower
 # Stop when the LOWEST y1 (top edge) across all detected bboxes is greater than this.
-T2_TOP_Y      = 200    # px: stop when every bbox top-edge is below this row
+T2_TOP_Y      = 128    # px: stop when every bbox top-edge is below this row
 T2_FWD_MAX          = 0.15   # m/s cap while approaching T2
 HELD_TOWER_MAX_AREA = 4000   # px²: bboxes smaller than this are ignored (held-scrap)
 
 # Arm positions  (x = mm forward from body, y = mm vertical)
 ARM_HOME      = (185, -80)   # retracted standby
-ARM_CARRY     = (185, -60)   # slight lift while carrying
+ARM_PICKUP    = (185, -50)   # slight lift while carrying   
+ARM_CARRY     = (185, -40)   # slight lift while carrying
 ARM_HIGH      = (175,  140)  # highest — used during swap lift
-ARM_LOW_TRAP  = (175,   80)  # low enough to trap / push T2
+ARM_LOW_TRAP_1  = (175,   50)  # low enough to trap / push T2
+ARM_LOW_TRAP_2  = (200,   50)  # low enough to trap / push T2
+ARM_LOW_TRAP_3  = (200,   -50)  # low enough to trap / push T2
+
 ARM_PICKUP    = (185,  -50)  # drop height
-
+ARM_INSIDE_TRAP = (165, -40)
 # Step 5 - swap towers
-SWAP_NUDGE_DIST  = 0.05      # m: creep forward to position T1 over T2
-SWAP_PUSH_DIST   = 0.15      # m: reverse to push T2 out of its spot
-SWAP_CLEAR_DIST  = 0.10      # m: back away after dropping T1
-SWAP_SPEED       = 0.30      # m/s for all swap chassis.move calls
+SWAP_NUDGE_DIST  = 0.22      # m: creep forward to position T1 over T2
+SWAP_PUSH_DIST   = 0.155      # m: reverse to push T2 out of its spot
+SWAP_CLEAR_DIST  = 0.1      # m: back away after dropping T1
+SWAP_SPEED       = 0.3      # m/s for all swap chassis.move calls
 
+#Step 6 - pick up tower 2
+step6_dist = 0.0
 
 # Helper Functions
 
@@ -286,7 +293,7 @@ def step2(ep_chassis, ep_camera, model):
 
         # Minor distance correction to stay ~0.2 m from T1 while orbiting
         err_y     = APPROACH_STOP_BOTTOM - t1['y2']
-        fwd_corr  = max(-0.05, min(0.05, err_y * FWD_KP))
+        fwd_corr  = max(-0.05, min(0.05, err_y * FWD_KP_ORBIT))
 
         # Check for second tower peeking over the first tower in the upper frame
         aligned = False
@@ -346,6 +353,7 @@ def step3(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
             write_text_on_video_feed(frame, f"Step 3 - GRAB  top={t1['y1']:.0f}", color=(0, 255, 255))
             show(frame)
             print(f"[STEP 3] Close enough (top={t1['y1']:.1f}). Grabbing...")
+            arm_moveto(ep_arm, ARM_PICKUP, "pickup")
             gripper_close(ep_gripper)
             arm_moveto(ep_arm, ARM_CARRY, "carry")
             print("[STEP 3] Done.")
@@ -353,8 +361,8 @@ def step3(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
 
         err_y     = t1['y1'] - GRAB_TOP_THRESHOLD    # how much further to go
         #fwd_speed = max(0.0, min(FWD_MAX * 0.6, err_y * FWD_KP))
-        fwd_speed = 0.1
-        #print(f'{fwd_speed}')
+        fwd_speed = 0.07
+        print(f'{fwd_speed}')
         drive(ep_chassis, x=fwd_speed, y=0.0, z=yaw_speed)
 
         write_text_on_video_feed(frame, f"Step 3 - fwd={fwd_speed:.2f}  yaw={yaw_speed:.1f}  top={t1['y1']:.0f}")
@@ -381,45 +389,47 @@ def step4(ep_chassis, ep_camera, model):
             continue
 
         bboxes = run_yolo(model, frame)
-        valid  = [b for b in bboxes if b['area'] >= HELD_TOWER_MAX_AREA]
 
-        if not valid:
+        if not bboxes and len(bboxes) >= 2:
             stop(ep_chassis)
             no_detect += 1
-            write_text_on_video_feed(frame, f"Step 4 - no T2  ({no_detect})", color=(0, 0, 255))
+            write_text_on_video_feed(frame, f"Step 4 - no bboxes ({no_detect})", color=(0, 0, 255))
             if show(frame):
                 raise KeyboardInterrupt
             if no_detect >= MAX_NO_DETECT:
                 raise RuntimeError("Step 4 - T2 lost for too long")
             time.sleep(0.05)
-            t_prev = time.time() # don't accumulate while stopped
+            t_prev = time.time()  # don't accumulate while stopped
             continue
 
         no_detect = 0
-        #t2 = valid[0] # largest valid bbox = T2
-        #draw_box(frame, t2, color=(255, 120, 0), label="T2")
+        
+        # Assign tower 2 to the bounding box with the highest top bar (minimum y1 value)
+        
+        t2 = min(bboxes, key=lambda b: b['y1']) # the highest bounding box in frame
+        
+        draw_box(frame, t2, color=(255, 120, 0), label="T2")
 
         err_x = t2['cx'] - FRAME_CX
         yaw_speed = max(-YAW_MAX, min(YAW_MAX, err_x * YAW_KP))
 
-        # Find the minimum y1 (top edge) across ALL detected bboxes.
-        # When every bbox top is below T2_TOP_Y (high pixel row = low in
-        # the frame), no block is visible in the distance — T2 is right here.
-        min_y1 = min(b['y1'] for b in bboxes)
-        if min_y1 > T2_TOP_Y:
+        # We move closer to T2 until its top reaches the threshold T2_TOP_Y
+        # (greater y value = lower on screen = closer to robot)
+        if t2['y1'] >= T2_TOP_Y and t2['y1'] < T2_TOP_Y + 10:
             stop(ep_chassis)
             write_text_on_video_feed(
                 frame,
-                f"Step 4 - DONE  min_y1={min_y1:.0f}  dist={fwd_distance:.3f}m",
+                f"Step 4 - DONE  t2_y1={t2['y1']:.0f}  dist={fwd_distance:.3f}m",
                 color=(0, 255, 255)
             )
             show(frame)
-            print(f"Step 4 - T2 reached. min_y1={min_y1:.1f}  odometry={fwd_distance:.3f} m")
+            print(f"Step 4 - T2 reached. t2_y1={t2['y1']:.1f}  odometry={fwd_distance:.3f} m")
             return fwd_distance
 
-        # Drive faster when bbox tops are still high in the frame (small y1).
-        err_y = T2_TOP_Y - min_y1  # positive while still far
-        fwd_speed = max(0.0, min(T2_FWD_MAX, err_y * FWD_KP))
+        # Error style control: Drive faster when t2 is still high in the frame (small y1)
+        err_y = T2_TOP_Y - t2['y1']  # positive while still far
+        #fwd_speed = max(0.0, min(T2_FWD_MAX, err_y * FWD_KP))
+        fwd_speed = 0.05
 
         # Dead-reckoning: accumulate speed * dt
         t_now = time.time()
@@ -429,10 +439,12 @@ def step4(ep_chassis, ep_camera, model):
         drive(ep_chassis, x=fwd_speed, y=0.0, z=yaw_speed)
         write_text_on_video_feed(
             frame,
-            f"Step 4 - fwd={fwd_speed:.2f}  dist={fwd_distance:.3f}m  min_y1={min_y1:.0f}"
+            f"Step 4 - fwd={fwd_speed:.2f}  dist={fwd_distance:.3f}m  t2_y1={t2['y1']:.0f}"
         )
         if show(frame):
             raise KeyboardInterrupt
+
+        
 
 
 #  Step 5: swap towers (pure odometry)
@@ -449,21 +461,25 @@ def step5(ep_chassis, ep_arm, ep_gripper):
     # (Always negative — robot ends up behind where it stopped at T2.)
 
     print("Step 5 - Swap sequence...")
-
     arm_moveto(ep_arm, ARM_HIGH, "raise-for-swap")
+    time.sleep(1)
 
     print(f"Step 5 - Nudge forward {SWAP_NUDGE_DIST} m")
     ep_chassis.move(x=SWAP_NUDGE_DIST, y=0, z=0, xy_speed=SWAP_SPEED).wait_for_completed()
+    time.sleep(1)
 
-    arm_moveto(ep_arm, ARM_LOW_TRAP, "lower-trap")
-    time.sleep(0.3)   # brief wait before we push the tower
+    arm_moveto(ep_arm, ARM_LOW_TRAP_1, "lower-trap-1")
+    arm_moveto(ep_arm, ARM_LOW_TRAP_2, "lower-trap-2")
+    arm_moveto(ep_arm, ARM_LOW_TRAP_3, "lower-trap-3")
+    time.sleep(1)   # brief wait before we push the tower
 
     print(f"Step 5 - Push backward {SWAP_PUSH_DIST} m")
     ep_chassis.move(x=-SWAP_PUSH_DIST, y=0, z=0, xy_speed=SWAP_SPEED).wait_for_completed()
-
+    
     gripper_open(ep_gripper)    # drop T1
-
-    arm_moveto(ep_arm, ARM_HIGH, "raise-over-T2")
+    
+    # arm_moveto(ep_arm, ARM_LOW_TRAP_1, "raise-over-T2")
+    ep_chassis.move(x=0.01, y=0, z=0, xy_speed=0.1).wait_for_completed()
 
     print(f"Step 5 - Clear backward {SWAP_CLEAR_DIST} m")
     ep_chassis.move(x=-SWAP_CLEAR_DIST, y=0, z=0, xy_speed=SWAP_SPEED).wait_for_completed()
@@ -495,9 +511,8 @@ def step6(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
             continue
 
         bboxes = run_yolo(model, frame)
-        valid  = [b for b in bboxes if b['area'] >= HELD_TOWER_MAX_AREA]
 
-        if not valid:
+        if len(bboxes) < 1:
             stop(ep_chassis)
             no_detect += 1
             write_text_on_video_feed(frame, f"STEP 6 | no detection ({no_detect})", color=(0, 0, 255))
@@ -508,14 +523,16 @@ def step6(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
             t_prev = time.time()
             continue
 
+        bboxes.sort(key=lambda b: b['area'], reverse=True)
+
         no_detect = 0
-        t2 = valid[0]
+        t2 = bboxes[0]
         draw_box(frame, t2, color=(0, 200, 255), label="T2-PICK")
 
         err_x     = t2['cx'] - FRAME_CX
         yaw_speed = max(-YAW_MAX, min(YAW_MAX, err_x * YAW_KP))
 
-        if t2['y1'] < GRAB_TOP_THRESHOLD:
+        if t2['y1'] > GRAB_TOP_THRESHOLD:
             stop(ep_chassis)
             write_text_on_video_feed(frame, f"Step 6 - GRAB  top={t2['y1']:.0f}", color=(0, 255, 255))
             show(frame)
@@ -563,19 +580,19 @@ def step7(ep_chassis, ep_arm, ep_gripper, step4_dist, swap_net, step6_dist):
     print(f"\nStep 7 - Returning to T1 original spot.")
     print(f"  step4={step4_dist:.3f}  swap_net={swap_net:.3f}  step6={step6_dist:.3f}")
     print(f"  → driving backward {return_dist:.3f} m")
+    
+    arm_moveto(ep_arm, ARM_INSIDE_TRAP, "trap-inside")
 
     if return_dist > 0.01:
-        ep_chassis.move(x=-return_dist, y=0, z=0, xy_speed=SWAP_SPEED).wait_for_completed()
+        ep_chassis.move(x=-return_dist, y=0, z=0, xy_speed=0.08).wait_for_completed()
 
-    arm_moveto(ep_arm, ARM_PICKUP, "drop-lower")
-    time.sleep(0.3)
-
-    gripper_open(ep_gripper)    # drop T2
-
-    arm_moveto(ep_arm, ARM_HOME, "home-final")
+    arm_moveto(ep_arm, ARM_LOW_TRAP_1, "drop-lower")
+    time.sleep(1)
 
     # Back up a little to clear the droped tower
     ep_chassis.move(x=-0.08, y=0, z=0, xy_speed=SWAP_SPEED).wait_for_completed()
+
+    gripper_open(ep_gripper)    # drop T2
 
     print("Step 7 - T2 droped at T1's original spot. Done.")
 
@@ -585,6 +602,7 @@ def main():
     ep_robot, ep_chassis, ep_arm, ep_gripper, ep_camera, model = setup_robot()
 
     try:
+        
         # ── 1. Find and close on the nearest lego tower ───────────────────────
         step1(ep_chassis, ep_camera, model)
 
@@ -596,16 +614,17 @@ def main():
         
         # ── 4. Approach tower 2 while accumulating odometry ──────────────────
         step4_dist = step4(ep_chassis, ep_camera, model)
-        '''
+
         # ── 5. Physical swap manoeuvre (pure odometry) ────────────────────────
         swap_net = step5(ep_chassis, ep_arm, ep_gripper)
 
+        '''
         # ── 6. Pick up tower 2, accumulate return odometry ───────────────────
         step6_dist = step6(ep_chassis, ep_arm, ep_gripper, ep_camera, model)
-
+        '''
         # ── 7. Drive back to tower 1's spot and drop tower 2 ────────
         step7(ep_chassis, ep_arm, ep_gripper, step4_dist, swap_net, step6_dist)
-        '''
+        
         print("\n Lego tower swap complete!")
 
     except KeyboardInterrupt:

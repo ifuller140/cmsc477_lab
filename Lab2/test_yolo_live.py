@@ -46,6 +46,15 @@ def main():
                     cv2.putText(frame, f"Lego {conf:.2f}", (int(xyxy[0]), int(xyxy[1])-10), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                 
+                valid = []
+
+                for b in bboxes:
+                    if b['y1'] < 200:
+                        valid.append(b)
+                
+                if not valid:
+                    stop(ep_chassis)
+                    no_detect += 1
                 cv2.imshow('RoboMaster YOLO Live', frame)
                 
                 if cv2.waitKey(1) == ord('q'):
