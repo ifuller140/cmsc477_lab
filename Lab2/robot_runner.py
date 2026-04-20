@@ -2,6 +2,7 @@ import cv2
 import time
 import os
 import sys
+import math
 from ultralytics import YOLO
 import robomaster
 from robomaster import robot, camera
@@ -29,8 +30,9 @@ GRAB_TOP_THRESHOLD  = 100     # px: grab when bbox TOP edge (xyxy[1]) > this val
 GRIPPER_POWER       = 50
 GRIPPER_HOLD        = 1.0    # s — hold after issuing open/close (must be ≤ 1 s)
 
-# Step 4 - approach second tower
-T2_STOP_BOTTOM      = 300    # px: stop near T2 when its bbox bottom reaches this
+# Step 4 - approach the second tower
+# Stop when the LOWEST y1 (top edge) across all detected bboxes is greater than this.
+T2_TOP_Y      = 200    # px: stop when every bbox top-edge is below this row
 T2_FWD_MAX          = 0.15   # m/s cap while approaching T2
 HELD_TOWER_MAX_AREA = 4000   # px²: bboxes smaller than this are ignored (held-scrap)
 
@@ -114,22 +116,48 @@ def drive(ep_chassis, x=0.0, y=0.0, z=0.0):
 def stop(ep_chassis):
     ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0)
 
-# Moves the arm to a specific position
-def arm_moveto(ep_arm, pos, label=""):
+# Global to track the arm's position
+CURRENT_ARM_POS = None
+
+# Moves the arm to a specific position slowly
+def arm_moveto(ep_arm, pos, label="", step_size=10):
+    global CURRENT_ARM_POS
     x, y = pos
-    print(f"[ARM] {label} → moveto(x={x}, y={y})")
-    ep_arm.moveto(x=x, y=y).wait_for_completed()
+    print(f"Arm {label} → moveto(x={x}, y={y})")
+    
+    # If starting up and current position is unknown, just jump there
+    if CURRENT_ARM_POS is None:
+        ep_arm.moveto(x=x, y=y).wait_for_completed()
+        CURRENT_ARM_POS = (x, y)
+        return
+        
+    cx, cy = CURRENT_ARM_POS
+    dist = math.hypot(x - cx, y - cy)
+    if dist == 0:
+        return
+        
+    # Interpolate from current position to target
+    steps = max(1, int(dist / step_size))
+    dx = (x - cx) / steps
+    dy = (y - cy) / steps
+    
+    for i in range(1, steps + 1):
+        next_x = int(cx + dx * i)
+        next_y = int(cy + dy * i)
+        ep_arm.moveto(x=next_x, y=next_y).wait_for_completed()
+        
+    CURRENT_ARM_POS = (x, y)
 
 # Closes the gripper
 def gripper_close(ep_gripper):
-    print(f"[GRIP] close (power={GRIPPER_POWER})")
+    print(f"Gripper close (power={GRIPPER_POWER})")
     ep_gripper.close(power=GRIPPER_POWER)
     time.sleep(GRIPPER_HOLD)
     ep_gripper.pause()
 
 # Opens the gripper
 def gripper_open(ep_gripper):
-    print(f"[GRIP] open  (power={GRIPPER_POWER})")
+    print(f"Gripper open (power={GRIPPER_POWER})")
     ep_gripper.open(power=GRIPPER_POWER)
     time.sleep(GRIPPER_HOLD)
     ep_gripper.pause()
@@ -368,34 +396,41 @@ def step4(ep_chassis, ep_camera, model):
             continue
 
         no_detect = 0
-        t2 = valid[1] # largest valid bbox = T2
-        draw_box(frame, t2, color=(255, 120, 0), label="T2")
+        #t2 = valid[0] # largest valid bbox = T2
+        #draw_box(frame, t2, color=(255, 120, 0), label="T2")
 
-        # draw ignored scraps
-        for b in bboxes:
-            if b['area'] < HELD_TOWER_MAX_AREA:
-                draw_box(frame, b, color=(100, 100, 0), label="held")
-
-        err_x     = t2['cx'] - FRAME_CX
+        err_x = t2['cx'] - FRAME_CX
         yaw_speed = max(-YAW_MAX, min(YAW_MAX, err_x * YAW_KP))
 
-        if t2['y2'] >= T2_STOP_BOTTOM:
+        # Find the minimum y1 (top edge) across ALL detected bboxes.
+        # When every bbox top is below T2_TOP_Y (high pixel row = low in
+        # the frame), no block is visible in the distance — T2 is right here.
+        min_y1 = min(b['y1'] for b in bboxes)
+        if min_y1 > T2_TOP_Y:
             stop(ep_chassis)
-            write_text_on_video_feed(frame, f"Step 4 - DONE  dist={fwd_distance:.3f}m", color=(0, 255, 255))
+            write_text_on_video_feed(
+                frame,
+                f"Step 4 - DONE  min_y1={min_y1:.0f}  dist={fwd_distance:.3f}m",
+                color=(0, 255, 255)
+            )
             show(frame)
-            print(f"Step 4 - T2 reached. Odometry distance = {fwd_distance:.3f} m")
+            print(f"Step 4 - T2 reached. min_y1={min_y1:.1f}  odometry={fwd_distance:.3f} m")
             return fwd_distance
 
-        err_y     = T2_STOP_BOTTOM - t2['y2']
+        # Drive faster when bbox tops are still high in the frame (small y1).
+        err_y = T2_TOP_Y - min_y1  # positive while still far
         fwd_speed = max(0.0, min(T2_FWD_MAX, err_y * FWD_KP))
 
         # Dead-reckoning: accumulate speed * dt
-        t_now         = time.time()
+        t_now = time.time()
         fwd_distance += fwd_speed * (t_now - t_prev)
-        t_prev        = t_now
+        t_prev = t_now
 
         drive(ep_chassis, x=fwd_speed, y=0.0, z=yaw_speed)
-        write_text_on_video_feed(frame, f"Step 4 - fwd={fwd_speed:.2f}  dist={fwd_distance:.3f}m  bot={t2['y2']:.0f}")
+        write_text_on_video_feed(
+            frame,
+            f"Step 4 - fwd={fwd_speed:.2f}  dist={fwd_distance:.3f}m  min_y1={min_y1:.0f}"
+        )
         if show(frame):
             raise KeyboardInterrupt
 
@@ -421,7 +456,7 @@ def step5(ep_chassis, ep_arm, ep_gripper):
     ep_chassis.move(x=SWAP_NUDGE_DIST, y=0, z=0, xy_speed=SWAP_SPEED).wait_for_completed()
 
     arm_moveto(ep_arm, ARM_LOW_TRAP, "lower-trap")
-    time.sleep(0.3)   # brief settle before push
+    time.sleep(0.3)   # brief wait before we push the tower
 
     print(f"Step 5 - Push backward {SWAP_PUSH_DIST} m")
     ep_chassis.move(x=-SWAP_PUSH_DIST, y=0, z=0, xy_speed=SWAP_SPEED).wait_for_completed()
@@ -438,13 +473,12 @@ def step5(ep_chassis, ep_arm, ep_gripper):
     return net
 
 
-#  Step 6: pick up tower 2 (accumulate dead-reckoning distance)
+#  Step 6: pick up tower 2 (accumulate memorizing motion distance)
 def step6(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
-    """
-    T2 is now near the robot (pushed during swap).  Home the arm, open gripper,
-    then approach and grab T2 using the same bbox logic as step 3.
-    Returns forward distance driven (metres) for dead-reckoning.
-    """
+    # The idea: T2 is now near the robot (pushed during swap).  Home the arm, open gripper,
+    # then approach and grab T2 using the same bbox logic as step 3
+    # Returns forward distance driven in meters for memorizing its motion
+
     print("Step 6 - Picking up tower 2...")
     arm_moveto(ep_arm, ARM_HOME, "home-for-pickup")
     gripper_open(ep_gripper)
@@ -506,24 +540,23 @@ def step6(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
 
 #  Step 7: return and drop tower 2 at tower 1's original spot
 def step7(ep_chassis, ep_arm, ep_gripper, step4_dist, swap_net, step6_dist):
-    """
-    Drive backward to T1's original grab position and drop T2.
+    # Drive backward to T1's original grab position and drop T2.
 
-    Position accounting (all relative to where robot grabbed T1 = position 0):
-      After step 4 stop:     robot is at  +step4_dist
-      After step 5 (swap):   robot is at  +step4_dist + swap_net     (swap_net < 0)
-      After step 6 grab:     robot is at  +step4_dist + swap_net + step6_dist
+    # Position accounting (all relative to where robot grabbed T1 = position 0):
+    #   After step 4 stop:     robot is at  +step4_dist
+    #   After step 5 (swap):   robot is at  +step4_dist + swap_net     (swap_net < 0)
+    #   After step 6 grab:     robot is at  +step4_dist + swap_net + step6_dist
 
-    To return to position 0 we must drive:
-      return_dist = step4_dist + swap_net + step6_dist   (which may be < total step4)
+    # To return to position 0 we must drive:
+    # return_dist = step4_dist + swap_net + step6_dist   (which may be < total step4)
 
-    Sequence:
-      1. Drive backward  return_dist
-      2. Lower arm to ARM_PICKUP
-      3. Open gripper (drop T2)
-      4. Home arm
-      5. Back up a few cm to clear the tower
-    """
+    # Sequence:
+    #   1. Drive backward  return_dist
+    #   2. Lower arm to ARM_PICKUP
+    #   3. Open gripper (drop T2)
+    #   4. Home arm
+    #   5. Back up a few cm to clear the tower
+
     return_dist = step4_dist + swap_net + step6_dist
     return_dist = max(0.0, return_dist)   # safety: never drive forward here
 
