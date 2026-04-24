@@ -481,8 +481,7 @@ def step5(ep_chassis, ep_arm, ep_gripper):
     # arm_moveto(ep_arm, ARM_LOW_TRAP_1, "raise-over-T2")
     ep_chassis.move(x=0.01, y=0, z=0, xy_speed=0.1).wait_for_completed()
 
-    print(f"Step 5 - Clear backward {SWAP_CLEAR_DIST} m")
-    ep_chassis.move(x=-SWAP_CLEAR_DIST, y=0, z=0, xy_speed=SWAP_SPEED).wait_for_completed()
+    arm_moveto(ep_arm, ARM_INSIDE_TRAP, "trap-inside")
 
     net = SWAP_NUDGE_DIST - SWAP_PUSH_DIST - SWAP_CLEAR_DIST   # e.g. 0.05-0.15-0.10 = -0.20
     print(f"Step 5 - Done. Net displacement from step-4 stop: {net:.3f} m")
@@ -557,22 +556,6 @@ def step6(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
 
 #  Step 7: return and drop tower 2 at tower 1's original spot
 def step7(ep_chassis, ep_arm, ep_gripper, step4_dist, swap_net, step6_dist):
-    # Drive backward to T1's original grab position and drop T2.
-
-    # Position accounting (all relative to where robot grabbed T1 = position 0):
-    #   After step 4 stop:     robot is at  +step4_dist
-    #   After step 5 (swap):   robot is at  +step4_dist + swap_net     (swap_net < 0)
-    #   After step 6 grab:     robot is at  +step4_dist + swap_net + step6_dist
-
-    # To return to position 0 we must drive:
-    # return_dist = step4_dist + swap_net + step6_dist   (which may be < total step4)
-
-    # Sequence:
-    #   1. Drive backward  return_dist
-    #   2. Lower arm to ARM_PICKUP
-    #   3. Open gripper (drop T2)
-    #   4. Home arm
-    #   5. Back up a few cm to clear the tower
 
     return_dist = step4_dist + swap_net + step6_dist
     return_dist = max(0.0, return_dist)   # safety: never drive forward here
@@ -581,7 +564,7 @@ def step7(ep_chassis, ep_arm, ep_gripper, step4_dist, swap_net, step6_dist):
     print(f"  step4={step4_dist:.3f}  swap_net={swap_net:.3f}  step6={step6_dist:.3f}")
     print(f"  → driving backward {return_dist:.3f} m")
     
-    arm_moveto(ep_arm, ARM_INSIDE_TRAP, "trap-inside")
+    
 
     if return_dist > 0.01:
         ep_chassis.move(x=-return_dist, y=0, z=0, xy_speed=0.08).wait_for_completed()
