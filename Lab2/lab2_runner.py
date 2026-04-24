@@ -7,10 +7,9 @@ from ultralytics import YOLO
 import robomaster
 from robomaster import robot, camera
 
-# Constants (From robot_runner.py for reliable hardware interaction)
 YAW_KP   = 0.1              # deg per horizontal pixel error
 YAW_MAX  = 20.0             # deg clamp
-FRAME_CX = 320
+FRAME_CX = 320              # center of the camera frame in x direction
 
 FWD_KP   = 0.0015           # m/s per pixel error
 FWD_MAX  = 0.15             # m/s clamp
@@ -22,26 +21,28 @@ GRIPPER_POWER       = 50
 GRIPPER_HOLD        = 1.0  # seconds hold
 
 # Arm positions (x = mm forward, y = mm vertical)
-ARM_HOME      = (185, -80)  # retracted standby
-ARM_CARRY     = (185, -40)  # slight lift while carrying
-ARM_PICKUP    = (185, -50)  # drop height / grab height
+ARM_HOME      = (185, -80)  # regular position
+ARM_CARRY     = (185, -40)  # whiel carrying a tower
+ARM_PICKUP    = (185, -50)  # picking it up height
 
-# Variables & Constants for Lab 2 Logic (Theta/dist homing)
 SCAN_STEP  = 10.0           # degrees per scan increment when searching
 SCAN_SPEED = 10.0           # deg/s for chassis.move() rotation calls
 CENTER_TOL = 10             # pixels: bbox cx must be within this to count as centered
 MOVE_SPEED = 0.1           # m/s for chassis.move() straight legs
 SLOW_BACKUP_SPEED = 0.05
 
+# Temporary location to drop tower 1
 TEMP_ANGLE    = 270.0       # degrees from home forward direction
-TEMP_DISTANCE = 0.10        # meters from home
-TEMP_ANGLE_RETURN = 100.0   # goes back and looks around here for temp
+TEMP_DISTANCE = 0.10        
+TEMP_ANGLE_RETURN = 100.0
 
-# Global state for returning home
-current_theta = 0.0         # Robot heading in degrees (0 = home forward)
+# Global position states that we track
+current_theta = 0.0
 CURRENT_ARM_POS = None
 
-# Helper Functions (From robot_runner.py)
+# Helper Functions
+
+# Gets the current frame from the camera
 def get_frame(ep_camera, retries=3): 
     for _ in range(retries):
         try:
@@ -49,10 +50,11 @@ def get_frame(ep_camera, retries=3):
             if frame is not None:
                 return frame
         except Exception as e:
-            print(f"[CAM] read error: {e}")
+            print(f"Camera error: {e}")
         time.sleep(0.05)
     return None
 
+# Runs Yolo on the current camera frame
 def run_yolo(model, frame):
     try:
         result = model.predict(source=frame, show=False, verbose=False)[0]
@@ -76,6 +78,7 @@ def run_yolo(model, frame):
         print(f"yolo error: {e}")
         return []
 
+# Draws The bounding box around the detected object
 def draw_box(frame, b, color=(0, 255, 0), label=""):
     cv2.rectangle(frame, (int(b['x1']), int(b['y1'])), (int(b['x2']), int(b['y2'])), color, 2)
     if label:
@@ -89,6 +92,7 @@ def show(frame, title="RoboMaster"):
     cv2.imshow("lab2_runner", frame)
     return (cv2.waitKey(1) & 0xFF) == ord('q')
 
+# This is our actual move function
 def drive(ep_chassis, x=0.0, y=0.0, z=0.0):
     ep_chassis.drive_speed(
         x=max(-FWD_MAX, min(FWD_MAX, x)),
@@ -96,13 +100,14 @@ def drive(ep_chassis, x=0.0, y=0.0, z=0.0):
         z=max(-YAW_MAX, min(YAW_MAX, z)),
     )
 
+# Called to completly stop the motors by setting all speeds to 0
 def stop(ep_chassis):
     ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0)
 
+# Arm controller
 def arm_moveto(ep_arm, pos, label="", step_size=10):
     global CURRENT_ARM_POS
     x, y = pos
-    print(f"[ARM] {label} -> moveto(x={x}, y={y})")
     
     if CURRENT_ARM_POS is None:
         ep_arm.moveto(x=x, y=y).wait_for_completed()
@@ -126,17 +131,18 @@ def arm_moveto(ep_arm, pos, label="", step_size=10):
     CURRENT_ARM_POS = (x, y)
 
 def gripper_close(ep_gripper):
-    print(f"[GRIPPER] close (power={GRIPPER_POWER})")
+    print(f"Gripper close")
     ep_gripper.close(power=GRIPPER_POWER)
     time.sleep(GRIPPER_HOLD)
     ep_gripper.pause()
 
 def gripper_open(ep_gripper):
-    print(f"[GRIPPER] open (power={GRIPPER_POWER})")
+    print(f"Gripper open")
     ep_gripper.open(power=GRIPPER_POWER)
     time.sleep(GRIPPER_HOLD)
     ep_gripper.pause()
 
+# Initialization of the robot including connecting and resetting the arm and gripper
 def setup_robot():
     print("Loading YOLO...")
     w = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cmsc477_yolo/runs/detect/lego_gpu_train3/weights/best.pt")
@@ -165,7 +171,7 @@ def setup_robot():
     try:
         ep_camera.start_video_stream(display=False, resolution=camera.STREAM_360P)
     except Exception as e:
-        print(f"ERROR: camera failed: {e}")
+        print(f"Camera error: {e}")
         ep_robot.close()
         sys.exit(1)
 
@@ -173,7 +179,6 @@ def setup_robot():
     return ep_robot, ep_chassis, ep_arm, ep_gripper, ep_camera, model
 
 def shutdown_robot(ep_robot, ep_chassis, ep_camera):
-    print("Cleaning up...")
     for fn in [lambda: stop(ep_chassis),
                lambda: ep_camera.stop_video_stream(),
                lambda: ep_robot.close()]:
@@ -184,13 +189,12 @@ def shutdown_robot(ep_robot, ep_chassis, ep_camera):
     cv2.destroyAllWindows()
     print("Shut down.")
 
-# Odometry & Navigation Helpers (Tracking Theta)
+# Odometry and navigation helpers while tracking theta
 def rotate_by(ep_chassis, delta_deg):    
     global current_theta
     if abs(delta_deg) < 0.3:
         return
     new_theta = current_theta + delta_deg
-    print(f"[ROTATE] {delta_deg:+.1f} deg -> theta={new_theta:.1f} deg")
     ep_chassis.move(x=0, y=0, z=delta_deg, z_speed=SCAN_SPEED).wait_for_completed()
     current_theta = new_theta
     time.sleep(0.15)
@@ -202,27 +206,24 @@ def rotate_to(ep_chassis, target_deg):
     while delta < -180: delta += 360
     rotate_by(ep_chassis, delta)
 
+# Makes sure to track the distance travelled while driving to a target
 def drive_straight(ep_chassis, dist_m, speed=None):
     if speed is None: speed = MOVE_SPEED
     if abs(dist_m) < 0.005: return
-    print(f"[DRIVE] {dist_m:+.4f} m at {speed:.3f} m/s")
+    print(f"{dist_m:+.4f} m at {speed:.3f} m/s")
     ep_chassis.move(x=dist_m, y=0, z=0, xy_speed=abs(speed)).wait_for_completed()
     time.sleep(0.15)
 
-# Core Actions (Using robot_runner.py's proportional methodology)
+# Look for bounding boxes and rotate until we find any
 def scan_and_center(ep_chassis, ep_camera, model):
-    """
-    Search for tower 360 degrees and center.
-    Track the exact theta we turn using rotate_by.
-    """
-    print("[SCAN] Searching for tower...")
+
+    print("Searching for tower...")
     scanned_total = 0.0
-    MAX_SCAN_DEG  = 360.0
     global current_theta
 
     t_prev = time.time()
 
-    while scanned_total < MAX_SCAN_DEG:
+    while scanned_total < 360.0:
         frame = get_frame(ep_camera)
         if frame is None:
             t_prev = time.time()
@@ -247,13 +248,13 @@ def scan_and_center(ep_chassis, ep_camera, model):
 
         if abs(err_x) <= CENTER_TOL:
             stop(ep_chassis)
-            print(f"[SCAN] Centered! theta={current_theta:.1f} deg")
-            write_text_on_video_feed(frame, "CENTERED!", color=(0,255,255))
+            print(f"Centered! theta={current_theta:.1f} deg")
+            write_text_on_video_feed(frame, "Centered!", color=(0,255,255))
             show(frame)
             time.sleep(0.3)
             return
 
-        # Continuous Proportional Controller mapping exactly to robot_runner.py
+        # Continuous proportional controller mapping exactly to robot_runner.py
         yaw_speed = max(-YAW_MAX, min(YAW_MAX, err_x * YAW_KP))
         
         # Drive continuously
@@ -263,9 +264,6 @@ def scan_and_center(ep_chassis, ep_camera, model):
         dt = t_now - t_prev
         t_prev = t_now
 
-        # Because drive_speed uses opposite coordinate limits mapping we adjust theta natively
-        # Positive yaw_speed = Turn right (negative degrees mathematically depending on setting)
-        # So integration tracks drift ensuring home alignment persists.
         current_theta -= yaw_speed * dt
         scanned_total += abs(yaw_speed * dt)
 
@@ -273,21 +271,14 @@ def scan_and_center(ep_chassis, ep_camera, model):
         if show(frame): 
             raise KeyboardInterrupt
 
-    raise RuntimeError("[SCAN] No tower found after full 360 deg")
+    raise RuntimeError("No tower found")
 
 
 def approach_tower(ep_chassis, ep_camera, model):
-    """
-    Two-phase approach:
-      1. Proportional coarse error response from robot_runner.py Step1
-      2. Fine drive-in from robot_runner.py Step3
-    """
-    print("[APPROACH] Driving toward tower...")
+    print("Driving toward tower...")
     fwd_distance = 0.0
     t_prev = time.time()
-    
-    # Coarse Phase
-    print("[APPROACH] Coarse phase...")
+
     while True:
         frame = get_frame(ep_camera)
         if frame is None: continue
@@ -296,7 +287,7 @@ def approach_tower(ep_chassis, ep_camera, model):
         if not bboxes:
             stop(ep_chassis)
             t_prev = time.time()
-            write_text_on_video_feed(frame, "Coarse - no detection", color=(0,0,255))
+            write_text_on_video_feed(frame, "No tower detected", color=(0,0,255))
             if show(frame): raise KeyboardInterrupt
             continue
             
@@ -308,13 +299,12 @@ def approach_tower(ep_chassis, ep_camera, model):
         
         if t1['y2'] >= APPROACH_STOP_BOTTOM:
             stop(ep_chassis)
-            write_text_on_video_feed(frame, f"Coarse Done bot={t1['y2']:.0f}", color=(0, 255, 255))
+            write_text_on_video_feed(frame, f"Done bottem ={t1['y2']:.0f}", color=(0, 255, 255))
             show(frame)
-            print(f"[APPROACH] Coarse done. bot={t1['y2']:.0f}")
             break
             
         err_y = APPROACH_STOP_BOTTOM - t1['y2']
-        # Proportional fwd_speed based on vertical error distance (from robot_runner)
+
         fwd_speed = max(0.0, min(FWD_MAX, err_y * FWD_KP))
         
         t_now = time.time()
@@ -326,8 +316,7 @@ def approach_tower(ep_chassis, ep_camera, model):
         write_text_on_video_feed(frame, f"Coarse FWD:{fwd_speed:.2f} DIST:{fwd_distance:.2f} BOT:{t1['y2']:.0f}")
         if show(frame): raise KeyboardInterrupt
 
-    # Fine Phase
-    print("[APPROACH] Fine phase...")
+    # final approach to tower usign the top of the bounding box
     t_prev = time.time()
     while True:
         frame = get_frame(ep_camera)
@@ -347,14 +336,13 @@ def approach_tower(ep_chassis, ep_camera, model):
         err_x = t1['cx'] - FRAME_CX
         yaw_speed = max(-YAW_MAX, min(YAW_MAX, err_x * YAW_KP))
         
-        if t1['y1'] > GRAB_TOP_THRESHOLD:
+        if t1['y1'] > GRAB_TOP_THRESHOLD: # stop when the top of the bounding box is at the top threshold
             stop(ep_chassis)
             write_text_on_video_feed(frame, f"GRAB top={t1['y1']:.0f}", color=(0, 255, 255))
             show(frame)
-            print(f"[APPROACH] Grab position reached. top={t1['y1']:.0f}. Total dist: {fwd_distance:.3f}m")
             return fwd_distance
             
-        fwd_speed = 0.07  # from robot_runner.py step3
+        fwd_speed = 0.07
         t_now = time.time()
         fwd_distance += fwd_speed * (t_now - t_prev)
         t_prev = t_now
@@ -366,27 +354,21 @@ def approach_tower(ep_chassis, ep_camera, model):
 
 
 def grab_tower(ep_arm, ep_gripper):
-    """Lower arm, close gripper, lift to carry height."""
     arm_moveto(ep_arm, ARM_PICKUP, "lower-to-grab")
     gripper_close(ep_gripper)
     arm_moveto(ep_arm, ARM_CARRY, "lift-to-carry")
 
 def place_tower(ep_arm, ep_gripper):
-    """Lower arm to place height, open gripper to release tower."""
     arm_moveto(ep_arm, ARM_PICKUP, "lower-to-place")
     time.sleep(0.3)
     gripper_open(ep_gripper)
 
 def return_to_home(ep_chassis, dist_m):
-    """
-    Back straight up dist_m meters, then snap heading back to 0 degrees.
-    """
-    print(f"[HOME] Backing up {dist_m:.3f}m to return to origin")
+    print(f"Backing up {dist_m:.3f}m to return to origin")
     drive_straight(ep_chassis, -dist_m)
     #rotate_to(ep_chassis, 0.0)
-    print(f"[HOME] At origin, theta={current_theta:.1f} deg")
+    print(f"At origin, theta={current_theta:.1f} deg")
 
-# High Level Sequence corresponding to lab2 tracking approach
 def step_a_find_and_grab_tower1(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
     print("\n--- step a: find and grab tower 1 ---")
     arm_moveto(ep_arm, ARM_HOME, "prep-home")
@@ -394,12 +376,12 @@ def step_a_find_and_grab_tower1(ep_chassis, ep_arm, ep_gripper, ep_camera, model
 
     scan_and_center(ep_chassis, ep_camera, model)
     theta1 = current_theta
-    print(f"[step-a] tower 1 is at theta={theta1:.1f} deg")
+    print(f"tower 1 is at theta={theta1:.1f} deg")
 
     dist1 = approach_tower(ep_chassis, ep_camera, model)
     grab_tower(ep_arm, ep_gripper)
 
-    print(f"[step-a] done: grabbed tower 1 at theta={theta1:.1f} deg  dist={dist1:.3f}m")
+    print(f"done: grabbed tower 1 at theta={theta1:.1f} deg  dist={dist1:.3f}m")
     return theta1, dist1
 
 def step_b_place_tower1_at_temp(ep_chassis, ep_arm, ep_gripper):
@@ -414,7 +396,7 @@ def step_b_place_tower1_at_temp(ep_chassis, ep_arm, ep_gripper):
 
     rotate_to(ep_chassis, 0.0)
 
-    print(f"[step-b] temp drop done at angle={TEMP_ANGLE} deg, dist={TEMP_DISTANCE}m. Back at home")
+    print(f"temp drop done at angle={TEMP_ANGLE} deg, dist={TEMP_DISTANCE}m. Back at home")
 
 def step_c_find_and_grab_tower2(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
     print("\n--- step c: find and grab tower 2 ---")
@@ -423,12 +405,12 @@ def step_c_find_and_grab_tower2(ep_chassis, ep_arm, ep_gripper, ep_camera, model
 
     scan_and_center(ep_chassis, ep_camera, model)
     theta2 = current_theta
-    print(f"[step-c] tower 2 is at theta={theta2:.1f} deg")
+    print(f"tower 2 is at theta={theta2:.1f} deg")
 
     dist2 = approach_tower(ep_chassis, ep_camera, model)
     grab_tower(ep_arm, ep_gripper)
 
-    print(f"[step-c] done: grabbed tower 2 at theta={theta2:.1f} deg  dist={dist2:.3f}m")
+    print(f"done: grabbed tower 2 at theta={theta2:.1f} deg  dist={dist2:.3f}m")
     return theta2, dist2
 
 def step_d_place_tower2_at_t1_spot(ep_chassis, ep_arm, ep_gripper, theta1, dist1):
@@ -444,25 +426,24 @@ def step_d_place_tower2_at_t1_spot(ep_chassis, ep_arm, ep_gripper, theta1, dist1
 
     drive_straight(ep_chassis, -(dist1 - clear))
     rotate_to(ep_chassis, 0.0)
-    print("[step-d] tower 2 placed at t1 spot, back at home")
+    print("tower 2 placed at t1 spot, back at home")
 
 def step_e_find_and_grab_temp_tower1(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
     print("\n--- step e: find and grab temp tower 1 ---")
     arm_moveto(ep_arm, ARM_HOME, "prep-home")
     gripper_open(ep_gripper)
 
-    # Note: Lab2 approach does a rotate first to look at temp area, then scan
-    print("[step-e] rotating toward temp region to start scan")
+    print("rotating toward temp region to start scan")
     rotate_to(ep_chassis, TEMP_ANGLE_RETURN)
 
     scan_and_center(ep_chassis, ep_camera, model)
     theta_found = current_theta
-    print(f"[step-e] temp tower 1 found at theta={theta_found:.1f} deg")
+    print(f"temp tower 1 found at theta={theta_found:.1f} deg")
 
     dist_found = approach_tower(ep_chassis, ep_camera, model)
     grab_tower(ep_arm, ep_gripper)
 
-    print(f"[step-e] done: grabbed temp tower 1 at theta={theta_found:.1f} deg  dist={dist_found:.3f}m")
+    print(f"done: grabbed temp tower 1 at theta={theta_found:.1f} deg  dist={dist_found:.3f}m")
     return theta_found, dist_found
 
 def step_f_place_tower1_at_t2_spot(ep_chassis, ep_arm, ep_gripper, theta2, dist2):
@@ -479,10 +460,9 @@ def step_f_place_tower1_at_t2_spot(ep_chassis, ep_arm, ep_gripper, theta2, dist2
     drive_straight(ep_chassis, -(dist2 - clear))
     rotate_to(ep_chassis, 0.0)
 
-    print("[step-f] tower 1 placed at t2 spot, back at home")
-    print("[step-f] *** swap complete ***")
+    print("tower 1 placed at t2 spot, back at home")
+    print("*** swap complete ***")
 
-# Main Execution
 def main():
     ep_robot, ep_chassis, ep_arm, ep_gripper, ep_camera, model = setup_robot()
 
@@ -508,9 +488,7 @@ def main():
         # f — place tower 1 at tower 2's original position — swap done
         step_f_place_tower1_at_t2_spot(ep_chassis, ep_arm, ep_gripper, theta2, dist2)
 
-        print("\n========================================")
-        print("  Lego tower swap complete!")
-        print("========================================\n")
+        print("Lego tower swap Done! YAY!")
 
     except KeyboardInterrupt:
         print("\nKeyboard interrupt received")
