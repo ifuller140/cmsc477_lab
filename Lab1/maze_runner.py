@@ -28,10 +28,10 @@ if __name__ == '__main__':
     print(f"Found path with {len(calculated_path)} wayppointsoints")
 
     # connect to the RoboMaster chassis and camera
-    robomaster.config.ROBOT_IP_STR = "192.168.50.116"
+    robomaster.config.ROBOT_IP_STR = "192.168.50.121"
     ep_robot = robot.Robot()
     print("Connecting to RoboMaster...")
-    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100UB")
     print("Connected.")
     
     ep_camera = ep_robot.camera

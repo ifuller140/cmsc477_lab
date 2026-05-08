@@ -14,9 +14,9 @@ def sub_data_handler(sub_info):
     print("Robotic Arm: pos x:{0}, pos y:{1}".format(pos_x, pos_y))
 
 if __name__ == '__main__':
-    robomaster.config.ROBOT_IP_STRING = "192.168.50.116"
+    robomaster.config.ROBOT_IP_STRING = "192.168.50.121"
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100UB")
     ep_arm = ep_robot.robotic_arm
     ep_chassis = ep_robot.chassis
     ep_gripper = ep_robot.gripper

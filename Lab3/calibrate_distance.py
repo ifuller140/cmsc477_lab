@@ -64,9 +64,9 @@ def main():
         class_names = ['small_lego', 'large_lego', 'box'] # Fallback
 
     print('Connecting to RoboMaster...')
-    robomaster.config.ROBOT_IP_STRING = "192.168.50.116"
+    robomaster.config.ROBOT_IP_STRING = "192.168.50.121"
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100UB")
     
     ep_camera = ep_robot.camera
     ep_camera.start_video_stream(display=False, resolution=camera.STREAM_360P)

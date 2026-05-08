@@ -60,7 +60,7 @@ def on_detect_marker(marker_info):
 
 if __name__ == '__main__':
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100UB")
 
 
     ep_vision = ep_robot.vision

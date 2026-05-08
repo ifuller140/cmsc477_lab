@@ -30,7 +30,7 @@ def sub_status_info_handler(status_info):
 
 if __name__ == '__main__':
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100UB")
 
 
     ep_chassis = ep_robot.chassis

@@ -29,8 +29,8 @@ import robomaster
 from robomaster import robot
 
 # ── Configuration ────────────────────────────────────────────────────────────
-ROBOT_IP   = "192.168.50.116"
-ROBOT_SN   = "3JKCH8800100VW"
+ROBOT_IP   = "192.168.50.121"
+ROBOT_SN   = "3JKCH8800100UB"
 
 MOVE_STEP      = 20    # mm per key press
 GRIPPER_POWER  = 60    # gripper strength (0-100)

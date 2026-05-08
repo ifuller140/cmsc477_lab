@@ -10,12 +10,12 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     
     # Configure the robot's IP
-    robomaster.config.ROBOT_IP_STR = "192.168.50.116"
+    robomaster.config.ROBOT_IP_STR = "192.168.50.121"
     ep_robot = robot.Robot()
     
     print("Connecting to RoboMaster...")
     try:
-        ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+        ep_robot.initialize(conn_type="sta", sn="3JKCH8800100UB")
         print("Connected.")
     except Exception as e:
         print(f"Failed to connect: {e}")

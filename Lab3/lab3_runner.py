@@ -1002,10 +1002,10 @@ def setup_robot():
     detector = pupil_apriltags.Detector(families="tag36h11", nthreads=2)
 
     print("connecting to robot...")
-    robomaster.config.ROBOT_IP_STR = "192.168.50.116"
+    robomaster.config.ROBOT_IP_STR = "192.168.50.121"
     ep_robot = robot.Robot()
     try:
-        ep_robot.initialize(conn_type="sta", sn="3JKCH8800100VW")
+        ep_robot.initialize(conn_type="sta", sn="3JKCH8800100UB")
     except Exception as e:
         print(f"[error] {e}")
         sys.exit(1)
