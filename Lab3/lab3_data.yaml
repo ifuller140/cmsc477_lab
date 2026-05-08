@@ -1,0 +1,5 @@
+path: ./datasets/lab3
+train: images/train
+val: images/val
+nc: 3
+names: ["small_lego", "large_lego", "box"]

@@ -1,0 +1,3 @@
+small_lego
+large_lego
+box
