@@ -1,11 +1,28 @@
 import cv2
 import os
+import json
 from ultralytics import YOLO
 import robomaster
 from robomaster import robot
 from robomaster import camera
 
+CALIBRATION_FILE = "distance_calibration.json"
+calibration_models = {}
+
+def load_calibration():
+    global calibration_models
+    try:
+        with open(CALIBRATION_FILE, 'r') as f:
+            calibration_models = json.load(f)
+        print(f"Loaded distance calibration models for: {list(calibration_models.keys())}")
+    except FileNotFoundError:
+        print(f"Warning: Calibration file '{CALIBRATION_FILE}' not found. Run calibrate_distance.py first.")
+    except Exception as e:
+        print(f"Error loading calibration: {e}")
+
 def main():
+    load_calibration()
+    
     print('Loading YOLO model for Lab 3...')
     file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs/detect/lab3_gpu_train/weights/best.pt")
     model = YOLO(file_path)
@@ -38,11 +55,19 @@ def main():
                     
                     x1, y1, x2, y2 = int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])
                     
+                    # Calculate approximated distance if calibration exists
+                    dist_text = ""
+                    if class_name in calibration_models and y2 != 0:
+                        A = calibration_models[class_name]['A']
+                        B = calibration_models[class_name]['B']
+                        distance = A * (1.0 / y2) + B
+                        dist_text = f" | Dist: {distance:.1f}cm"
+                    
                     # Draw rectangle
                     cv2.rectangle(frame, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
                     
-                    # Add confidence text and class name
-                    label = f"{class_name} {conf:.2f}"
+                    # Add confidence text, class name, and estimated distance
+                    label = f"{class_name} {conf:.2f}{dist_text}"
                     cv2.putText(frame, label, (x1, y1 - 10), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                     
