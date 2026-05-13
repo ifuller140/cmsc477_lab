@@ -79,6 +79,7 @@ APRILTAG SETUP:
 ═══════════════════════════════════════════════════════════════════════════════
 """
 
+import csv
 import cv2
 import numpy as np
 import time
@@ -116,17 +117,18 @@ BOX_H_M           = 0.26   # given: 26cm fabric cubes
 LEGO_SMALL_H_M    = 0.048  # small duplo stack — measure yours
 LEGO_LARGE_H_M    = 0.096  # large duplo stack — measure yours
 
-# apriltag ids — replace with your actual tag numbers
-TAG_SMALL_GOAL = 1
-TAG_LARGE_GOAL = 2
-TAG_RECHARGE   = 3
-TAG_SIZE_M     = 0.15       # measure your printed tag size
+# apriltag ids — each zone has two valid tags (either triggers zone discovery)
+TAGS_SMALL_GOAL = {11, 41}
+TAGS_LARGE_GOAL = {45, 19}
+TAGS_RECHARGE   = {38, 34}
+TAG_SIZE_M      = 0.15      # measure your printed tag size
 
-# yolo class indices — must match the order you trained
-CLS_CONE       = 0
-CLS_BOX        = 1
-CLS_LEGO_SMALL = 2
-CLS_LEGO_LARGE = 3
+# yolo class indices — matches lab3_data.yaml: nc=3, names=[small_lego, large_lego, box]
+# NOTE: cones are NOT a yolo class; detected via HSV color segmentation (key CLS_CONE=3)
+CLS_LEGO_SMALL = 0
+CLS_LEGO_LARGE = 1
+CLS_BOX        = 2
+CLS_CONE       = 3   # sentinel; filled by detect_cones_hsv, not by YOLO
 CONF_THRESH    = 0.50
 
 # battery (software simulation per project spec)
@@ -401,8 +403,9 @@ def run_yolo(model, frame):
     run yolo inference and return a dict of detections grouped by class.
     each detection has: x1,y1,x2,y2, cx,cy, w,h, area, conf.
     lists are sorted by area descending (largest = closest = most important).
+    CLS_CONE (key 3) is always returned empty here — filled by detect_cones_hsv.
     """
-    out = {CLS_CONE: [], CLS_BOX: [], CLS_LEGO_SMALL: [], CLS_LEGO_LARGE: []}
+    out = {CLS_LEGO_SMALL: [], CLS_LEGO_LARGE: [], CLS_BOX: [], CLS_CONE: []}
     try:
         res = model.predict(source=frame, show=False, verbose=False)[0]
         if res.boxes is None:
@@ -430,6 +433,48 @@ def run_yolo(model, frame):
     except Exception as e:
         print(f"[yolo] {e}")
     return out
+
+
+def detect_cones_hsv(frame):
+    """
+    detect orange traffic cones via HSV color segmentation.
+    returns list of detection dicts in the same format as run_yolo entries.
+    cones are bright saturated orange-red: H 0-20 or 160-179 in OpenCV scale.
+    minimum area 800px² filters out small orange lego pieces.
+    """
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    # orange-red band (wrap-around for deep red-orange hues)
+    mask = cv2.bitwise_or(
+        cv2.inRange(hsv, np.array([0,   150, 80]), np.array([20,  255, 255])),
+        cv2.inRange(hsv, np.array([160, 150, 80]), np.array([179, 255, 255])),
+    )
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask   = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  kernel)
+    mask   = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cones = []
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < 800:
+            continue
+        x, y, w, h = cv2.boundingRect(cnt)
+        cones.append({
+            'x1': float(x), 'y1': float(y),
+            'x2': float(x + w), 'y2': float(y + h),
+            'cx': float(x + w / 2), 'cy': float(y + h / 2),
+            'w': float(w), 'h': float(h),
+            'area': float(area),
+            'conf': 1.0,
+        })
+    cones.sort(key=lambda d: d['area'], reverse=True)
+    return cones
+
+
+def run_full_perception(model, frame):
+    """run YOLO + HSV cone detection and return merged detections dict."""
+    dets = run_yolo(model, frame)
+    dets[CLS_CONE] = detect_cones_hsv(frame)
+    return dets
 
 
 def detect_apriltags(detector, frame, known_world_positions=None):
@@ -547,30 +592,29 @@ def update_map(arena_map, dets, tags, rx, ry, ryaw, known_tag_positions):
         bear = tag['bearing']
         wx, wy = world_xy(rx, ry, ryaw, dist, bear)
 
-        if tag['id'] == TAG_SMALL_GOAL:
+        if tag['id'] in TAGS_SMALL_GOAL:
             if arena_map.goal_small is None:
                 arena_map.goal_small = (wx, wy)
-                known_tag_positions[TAG_SMALL_GOAL] = (wx, wy)
-                print(f"[map] small goal found at world ({wx:.2f}, {wy:.2f})")
-            # use known position to correct odometry drift
+                known_tag_positions[tag['id']] = (wx, wy)
+                print(f"[map] small goal found at world ({wx:.2f}, {wy:.2f}) via tag {tag['id']}")
             if 'corrected_rx' in tag:
                 corrected_rx = tag['corrected_rx']
                 corrected_ry = tag['corrected_ry']
 
-        elif tag['id'] == TAG_LARGE_GOAL:
+        elif tag['id'] in TAGS_LARGE_GOAL:
             if arena_map.goal_large is None:
                 arena_map.goal_large = (wx, wy)
-                known_tag_positions[TAG_LARGE_GOAL] = (wx, wy)
-                print(f"[map] large goal found at world ({wx:.2f}, {wy:.2f})")
+                known_tag_positions[tag['id']] = (wx, wy)
+                print(f"[map] large goal found at world ({wx:.2f}, {wy:.2f}) via tag {tag['id']}")
             if 'corrected_rx' in tag:
                 corrected_rx = tag['corrected_rx']
                 corrected_ry = tag['corrected_ry']
 
-        elif tag['id'] == TAG_RECHARGE:
+        elif tag['id'] in TAGS_RECHARGE:
             if arena_map.recharge is None:
                 arena_map.recharge = (wx, wy)
-                known_tag_positions[TAG_RECHARGE] = (wx, wy)
-                print(f"[map] recharge found at world ({wx:.2f}, {wy:.2f})")
+                known_tag_positions[tag['id']] = (wx, wy)
+                print(f"[map] recharge found at world ({wx:.2f}, {wy:.2f}) via tag {tag['id']}")
             if 'corrected_rx' in tag:
                 corrected_rx = tag['corrected_rx']
                 corrected_ry = tag['corrected_ry']
@@ -673,7 +717,7 @@ def navigate_to(ep_chassis, ep_camera, model, detector,
             continue
 
         rx, ry, ryaw = odom.get_pose()
-        dets = run_yolo(model, frame)
+        dets = run_full_perception(model, frame)
         tags = detect_apriltags(detector, frame, known_tags)
         crx, cry = update_map(arena_map, dets, tags, rx, ry, ryaw, known_tags)
         arena_map.update_robot(crx, cry, ryaw)
@@ -738,11 +782,33 @@ def spin_scan(ep_chassis, ep_camera, model, detector,
         if frame is None:
             continue
         rx, ry, ryaw = odom.get_pose()
-        dets = run_yolo(model, frame)
+        dets = run_full_perception(model, frame)
         tags = detect_apriltags(detector, frame, known_tags)
         update_map(arena_map, dets, tags, rx, ry, ryaw, known_tags)
         annotate_frame(frame, dets, tags, f"scanning... {_+1}/{steps}")
         arena_map.refresh()
+
+# ── csv map export ────────────────────────────────────────────────────────────
+
+def _save_map_csv(arena_map, filename="arena_map.csv"):
+    """write all discovered objects to a CSV for inspection / debugging."""
+    rows = []
+    for label, pos in [('small_goal', arena_map.goal_small),
+                       ('large_goal', arena_map.goal_large),
+                       ('recharge',   arena_map.recharge),
+                       ('dock',       arena_map.dock)]:
+        if pos:
+            rows.append({'type': label, 'x': round(pos[0], 3), 'y': round(pos[1], 3)})
+    for cx, cy in arena_map.cones:
+        rows.append({'type': 'cone', 'x': round(cx, 3), 'y': round(cy, 3)})
+    for ox, oy in arena_map.obstacles:
+        rows.append({'type': 'box_obstacle', 'x': round(ox, 3), 'y': round(oy, 3)})
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+    with open(path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=['type', 'x', 'y'])
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"[map] saved {len(rows)} objects to {filename}")
 
 # ── phase a: explore arena and discover all zones ────────────────────────────
 
@@ -785,6 +851,7 @@ def phase_explore(ep_chassis, ep_camera, model, detector,
     print(f"[explore] done. found: small_goal={arena_map.goal_small}, "
           f"large_goal={arena_map.goal_large}, recharge={arena_map.recharge}, "
           f"dock={arena_map.dock}, obstacles={len(arena_map.obstacles)}")
+    _save_map_csv(arena_map)
 
 
 def _check_for_dock(ep_camera, model, arena_map, odom):
@@ -830,7 +897,7 @@ def phase_pick_lego(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
         frame = get_frame(ep_camera)
         if frame is None:
             continue
-        dets = run_yolo(model, frame)
+        dets = run_full_perception(model, frame)
         all_lego = dets[CLS_LEGO_SMALL] + dets[CLS_LEGO_LARGE]
 
         if not all_lego:
@@ -865,7 +932,7 @@ def phase_pick_lego(ep_chassis, ep_arm, ep_gripper, ep_camera, model):
         frame = get_frame(ep_camera)
         if frame is None:
             continue
-        dets = run_yolo(model, frame)
+        dets = run_full_perception(model, frame)
         all_lego = dets[CLS_LEGO_SMALL] + dets[CLS_LEGO_LARGE]
 
         if not all_lego:
@@ -907,7 +974,7 @@ def phase_place_lego(ep_arm, ep_gripper):
 
 # ── phase d: recharge sequence ────────────────────────────────────────────────
 
-def phase_recharge(ep_chassis, ep_camera, detector, battery, arena_map, odom, known_tags):
+def phase_recharge(ep_chassis, ep_camera, model, detector, battery, arena_map, odom, known_tags):
     """
     navigate to the recharge station and perform the head-on approach protocol.
     the project requires:
@@ -934,7 +1001,7 @@ def phase_recharge(ep_chassis, ep_camera, detector, battery, arena_map, odom, kn
     stage_x = arena_map.recharge[0] - 0.6 * math.cos(math.radians(approach_angle))
     stage_y = arena_map.recharge[1] - 0.6 * math.sin(math.radians(approach_angle))
 
-    navigate_to(ep_chassis, ep_camera, None, detector,
+    navigate_to(ep_chassis, ep_camera, model, detector,
                 arena_map, odom, known_tags, stage_x, stage_y, stop_dist=0.15)
 
     # fine alignment using live apriltag detection
@@ -946,7 +1013,7 @@ def phase_recharge(ep_chassis, ep_camera, detector, battery, arena_map, odom, kn
             continue
 
         tags = detect_apriltags(detector, frame, known_tags)
-        rc_tags = [t for t in tags if t['id'] == TAG_RECHARGE]
+        rc_tags = [t for t in tags if t['id'] in TAGS_RECHARGE]
 
         if not rc_tags:
             # rotate slowly to find the tag
@@ -991,7 +1058,7 @@ def setup_robot():
     print("loading yolo weights...")
     weights = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        "cmsc477_yolo/runs/detect/logistics/weights/best.pt"
+        "runs/detect/lab3_gpu_train/weights/best.pt"
     )
     if not os.path.exists(weights):
         print(f"[error] weights not found at:\n  {weights}")
@@ -1084,7 +1151,7 @@ def main():
             # we check for the worst case (large brick) to be safe
             if battery.needs_recharge_for('large'):
                 print(f"[main] battery low ({battery.level}%) — recharging first")
-                phase_recharge(ep_chassis, ep_camera, detector,
+                phase_recharge(ep_chassis, ep_camera, model, detector,
                                battery, arena_map, odom, known_tags)
                 navigate_to(ep_chassis, ep_camera, model, detector,
                             arena_map, odom, known_tags, 0.0, 0.0)

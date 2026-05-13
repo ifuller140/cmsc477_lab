@@ -64,7 +64,7 @@ def main():
         class_names = ['small_lego', 'large_lego', 'box'] # Fallback
 
     print('Connecting to RoboMaster...')
-    robomaster.config.ROBOT_IP_STRING = "192.168.50.121"
+    robomaster.config.ROBOT_IP_STR = "192.168.50.121"
     ep_robot = robot.Robot()
     ep_robot.initialize(conn_type="sta", sn="3JKCH8800100UB")
     
