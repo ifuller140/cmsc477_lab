@@ -6,7 +6,7 @@ import math
 import threading
 import numpy as np
 import matplotlib
-matplotlib.use('TkAgg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import pupil_apriltags
@@ -16,8 +16,8 @@ from robomaster import robot, camera
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
-ROBOT_IP  = "192.168.50.116"
-ROBOT_SN  = "3JKCH8800100VW"
+ROBOT_IP  = "192.168.50.111"
+ROBOT_SN  = "3JKCH88001009E"
 
 ARENA_M   = 3.048    # 10 ft arena side length (m)
 BOX_SIZE  = 0.26     # fabric box side (m)
@@ -26,8 +26,8 @@ BOX_SIZE  = 0.26     # fabric box side (m)
 START_X   = 0.05
 START_Y   = 0.05
 
-SCAN_Y    = 0.75     # horizontal scan / transit line y
-DOCK_X    = 2.75     # loading dock x (near west wall)
+SCAN_Y    = 0.6     # horizontal scan / transit line y
+DOCK_X    = 1.5     # loading dock x (near west wall)
 
 # Loading dock plot bounds (plan-frame)
 DOCK_SW   = (1.75, 0.10)
@@ -40,11 +40,15 @@ TAGS_RECHARGE   = frozenset({38, 34})
 TAGS_KNOWN      = TAGS_SMALL_GOAL | TAGS_LARGE_GOAL | TAGS_RECHARGE
 
 TAG_SIZE_M = 0.15
-FOCAL_PX   = 600.0
-FRAME_W    = 640
-FRAME_H    = 360
-FRAME_CX   = FRAME_W / 2.0
-FRAME_CY   = FRAME_H / 2.0
+
+# Calibrated camera intrinsics (measured in Lab0)
+CAM_FX   = 314.0
+CAM_FY   = 314.0
+CAM_CX   = 320.0
+CAM_CY   = 180.0
+
+FRAME_W  = 640
+FRAME_H  = 360
 
 # YOLO class indices  (lab3_data.yaml: nc=3, names=[small_lego, large_lego, box])
 CLS_SMALL   = 0
@@ -69,6 +73,13 @@ FWD_SPEED  = 0.10
 SLOW_SPEED = 0.05
 TURN_SPEED = 15.0
 
+# Proportional control for odometry-feedback driving
+DRIVE_KP     = 0.8    # forward/back proportional gain
+DRIVE_KP_YAW = 0.3    # heading-lock yaw correction gain during straight drive
+CRAB_KP      = 0.8    # strafe proportional gain
+CRAB_KP_YAW  = 0.3    # heading-lock yaw correction gain during strafe
+ODOM_TOL     = 0.015  # dead-zone: stop when error < 1.5 cm
+
 # Strafe scan
 STRAFE_SCAN_SPD = 0.10   # m/s horizontal sweep speed
 X_RECORD_TOL    = 15     # px: frame-center tolerance when logging a tag
@@ -86,8 +97,8 @@ RECHARGE_CLOSE_M = 0.05
 RECHARGE_HOLD_S  = 5.2
 
 # Arm (x mm forward from body, y mm vertical)
-ARM_HOME    = (185, -60)
-ARM_CARRY   = (185, -40)
+ARM_HOME    = (185, 40)
+ARM_CARRY   = (185, 40)
 ARM_PICKUP  = (185, -50)
 GRIPPER_POWER = 50
 GRIPPER_HOLD  = 1.0
@@ -96,6 +107,7 @@ GRIPPER_HOLD  = 1.0
 
 current_theta = 0.0   # degrees from north: 0 = north, 180 = south
 _arm_pos      = None  # last known arm (x, y)
+_yolo_model   = None  # lazy-loaded only when picking up legos
 
 
 # ── odometry tracker ──────────────────────────────────────────────────────────
@@ -173,7 +185,22 @@ def get_frame(ep_camera, retries=3):
     return None
 
 
-def run_yolo(model, frame):
+def _load_yolo():
+    global _yolo_model
+    if _yolo_model is None:
+        print("Loading YOLO model (first lego pickup)...")
+        w = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "runs/detect/lab3_gpu_train/weights/best.pt")
+        if not os.path.exists(w):
+            print(f"[error] weights not found: {w}")
+            sys.exit(1)
+        _yolo_model = YOLO(w)
+        print("[yolo] model loaded")
+    return _yolo_model
+
+
+def run_yolo(frame):
+    model = _load_yolo()
     out = {CLS_SMALL: [], CLS_LARGE: [], CLS_BOX: []}
     try:
         res = model.predict(source=frame, show=False, verbose=False)[0]
@@ -208,7 +235,7 @@ def detect_apriltags(detector, frame):
         raw = detector.detect(
             gray,
             estimate_tag_pose=True,
-            camera_params=[FOCAL_PX, FOCAL_PX, FRAME_CX, FRAME_CY],
+            camera_params=[CAM_FX, CAM_FY, CAM_CX, CAM_CY],
             tag_size=TAG_SIZE_M,
         )
         results = []
@@ -219,6 +246,7 @@ def detect_apriltags(detector, frame):
                 'dist':    float(t[2]),
                 'bearing': math.degrees(math.atan2(float(t[0]), float(t[2]))),
                 'center':  tag.center,
+                'corners': tag.corners,
                 'pose_t':  t,
             })
         return results
@@ -233,6 +261,22 @@ def draw_box(frame, b, color=(0, 255, 0), label=""):
     if label:
         cv2.putText(frame, label, (int(b['x1']), int(b['y1']) - 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2)
+
+
+def draw_apriltag(frame, tag, color=(0, 0, 255), extra=""):
+    """Draw tag corners polygon, X diagonals, ID and distance label."""
+    corners = tag['corners']
+    pts = corners.reshape((-1, 1, 2)).astype(np.int32)
+    cv2.polylines(frame, [pts], isClosed=True, color=color, thickness=2)
+    c = corners.astype(np.int32)
+    cv2.line(frame, tuple(c[0]), tuple(c[2]), color, 2)
+    cv2.line(frame, tuple(c[1]), tuple(c[3]), color, 2)
+    cx, cy = int(tag['center'][0]), int(tag['center'][1])
+    label = f"id={tag['id']} {tag['dist']:.2f}m"
+    if extra:
+        label += f" {extra}"
+    cv2.putText(frame, label, (cx - 50, cy - 14),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
 
 def write_text(frame, text, row=30, color=(0, 255, 0)):
@@ -269,15 +313,28 @@ def drive_straight(ep_chassis, dist_m, speed=None):
     time.sleep(0.12)
 
 
-def crab_walk(ep_chassis, dist_m, speed=None):
-    """Strafe: positive = left/west when facing north, negative = right/east."""
-    if speed is None:
-        speed = FWD_SPEED
+def crab_walk(ep_chassis, odom, dist_m, speed=None):
+    """Strafe with odometry proportional control and heading lock.
+    Positive = left/west when facing north."""
     if abs(dist_m) < 0.005:
         return
-    print(f"[crab] {dist_m:+.3f}m @ {speed:.2f}m/s")
-    ep_chassis.move(x=0, y=dist_m, z=0, xy_speed=abs(speed)).wait_for_completed()
-    time.sleep(0.12)
+    max_spd = min(abs(speed), STRAFE_MAX) if speed is not None else STRAFE_MAX
+    print(f"[crab] {dist_m:+.3f}m (proportional, max={max_spd:.2f}m/s)")
+    _, oy0, yaw0 = odom.get_pose()
+    target_oy = oy0 + dist_m
+    deadline = time.time() + max(abs(dist_m) / 0.03 + 3.0, 10.0)
+    while time.time() < deadline:
+        _, oy, yaw = odom.get_pose()
+        err_y   = target_oy - oy
+        err_yaw = yaw - yaw0
+        if abs(err_y) < ODOM_TOL:
+            break
+        cmd_y = max(-max_spd, min(max_spd, err_y * CRAB_KP))
+        cmd_z = max(-YAW_MAX, min(YAW_MAX, -err_yaw * CRAB_KP_YAW))
+        ep_chassis.drive_speed(x=0.0, y=cmd_y, z=cmd_z)
+        time.sleep(0.02)
+    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0)
+    time.sleep(0.1)
 
 
 def rotate_by(ep_chassis, delta_deg):
@@ -346,14 +403,6 @@ def gripper_open(ep_gripper):
 # ── robot setup / teardown ────────────────────────────────────────────────────
 
 def setup_robot():
-    print("Loading YOLO model...")
-    w = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                     "runs/detect/lab3_gpu_train/weights/best.pt")
-    if not os.path.exists(w):
-        print(f"[error] weights not found: {w}")
-        sys.exit(1)
-    model = YOLO(w)
-
     print("Setting up AprilTag detector...")
     detector = pupil_apriltags.Detector(families="tag36h11", nthreads=2)
 
@@ -384,8 +433,8 @@ def setup_robot():
     odom = OdometryTracker()
     odom.subscribe(ep_chassis)
 
-    print("Robot ready.\n")
-    return ep_robot, ep_chassis, ep_arm, ep_gripper, ep_camera, model, detector, odom
+    print("Robot ready. (YOLO loads on first lego pickup)\n")
+    return ep_robot, ep_chassis, ep_arm, ep_gripper, ep_camera, detector, odom
 
 
 def shutdown_robot(ep_robot, ep_chassis, ep_camera, odom):
@@ -421,17 +470,13 @@ def step2_scan_and_map(ep_chassis, ep_camera, detector, odom):
     South-facing april tags (goals, obstacles) are ahead; record each tag's
     plan-frame position when its centre aligns with the camera centre column.
 
-    Coordinate logic (facing north):
-      tag_plan_x = robot plan_x            (same x when tag is centred)
-      tag_plan_y = robot plan_y + dist     (dist = camera depth / forward distance)
-
     Returns tag_map: {tag_id: (plan_x, plan_y)}
     """
     print("\n--- Step 2: Strafe scan for april tags ---")
     tag_map  = {}
     seen_ids = set()
 
-    drive(ep_chassis, x=0.0, y=STRAFE_SCAN_SPD, z=0.0)  # strafe left = west
+    drive(ep_chassis, x=0.0, y=-1*STRAFE_SCAN_SPD, z=0.0)  # strafe left = west
     deadline = time.time() + 35
 
     while time.time() < deadline:
@@ -446,14 +491,15 @@ def step2_scan_and_map(ep_chassis, ep_camera, detector, odom):
         tags = detect_apriltags(detector, frame)
         for tag in tags:
             tid = tag['id']
+            cx  = float(tag['center'][0])
+            err_x = cx - CAM_CX
+
+            draw_apriltag(frame, tag, color=(255, 0, 255),
+                          extra=f"err={err_x:.0f}")
+
             if tid in seen_ids:
                 continue
-            cx    = float(tag['center'][0])
-            err_x = cx - FRAME_CX
-            cv2.circle(frame, (int(cx), int(tag['center'][1])), 10, (255, 0, 255), 2)
-            cv2.putText(frame, f"id={tid} err={err_x:.0f}",
-                        (int(cx) - 20, int(tag['center'][1]) - 18),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 1)
+
             if abs(err_x) < X_RECORD_TOL:
                 tx, ty = plan_x, plan_y + tag['dist']
                 tag_map[tid] = (tx, ty)
@@ -555,27 +601,22 @@ def step4_go_to_dock(ep_chassis, odom):
 
     y_err = SCAN_Y - plan_y
     if abs(y_err) > 0.02:
-        drive_straight(ep_chassis, y_err)
+        drive_straight(ep_chassis, odom, y_err)
 
     plan_x, _ = get_plan_pos(odom)
     x_err = DOCK_X - plan_x
     if abs(x_err) > 0.02:
-        crab_walk(ep_chassis, x_err)
+        crab_walk(ep_chassis, odom, x_err)
 
     print(f"[step4] at plan {get_plan_pos(odom)}")
 
 
 # ── step 5: face south, detect and grab lego ─────────────────────────────────
 
-def step5_pick_lego(ep_chassis, ep_arm, ep_gripper, ep_camera, model, odom):
+def step5_pick_lego(ep_chassis, ep_arm, ep_gripper, ep_camera, odom):
     """
-    Turn south (loading dock is south of scan line), two-phase visual-servo
-    approach to the nearest lego brick, then grab.
-
-    Phase 1 (coarse): drive until bbox bottom >= APPROACH_STOP_BOT.
-    Phase 2 (fine):   creep until bbox top > GRAB_TOP_{SMALL|LARGE}.
-
-    Returns (brick_type, fwd_dist_m) or (None, 0.0) on failure.
+    Turn south, two-phase visual-servo approach to the nearest lego brick, grab.
+    YOLO is loaded lazily on first call.
     """
     print("\n--- Step 5: Pick lego ---")
     rotate_to(ep_chassis, 180.0)
@@ -596,7 +637,7 @@ def step5_pick_lego(ep_chassis, ep_arm, ep_gripper, ep_camera, model, odom):
             t_prev = time.time()
             continue
 
-        dets     = run_yolo(model, frame)
+        dets     = run_yolo(frame)
         all_lego = dets[CLS_SMALL] + dets[CLS_LARGE]
 
         if not all_lego:
@@ -616,7 +657,7 @@ def step5_pick_lego(ep_chassis, ep_arm, ep_gripper, ep_camera, model, odom):
         target     = max(all_lego, key=lambda b: b['area'])
         brick_type = 'large' if target in dets[CLS_LARGE] else 'small'
 
-        err_x = target['cx'] - FRAME_CX
+        err_x = target['cx'] - CAM_CX
         yaw   = max(-YAW_MAX, min(YAW_MAX, err_x * YAW_KP))
 
         if target['y2'] >= APPROACH_STOP_BOT:
@@ -645,7 +686,7 @@ def step5_pick_lego(ep_chassis, ep_arm, ep_gripper, ep_camera, model, odom):
             t_prev = time.time()
             continue
 
-        dets     = run_yolo(model, frame)
+        dets     = run_yolo(frame)
         all_lego = dets[CLS_SMALL] + dets[CLS_LARGE]
 
         if not all_lego:
@@ -669,7 +710,7 @@ def step5_pick_lego(ep_chassis, ep_arm, ep_gripper, ep_camera, model, odom):
         brick_type = 'large' if target in dets[CLS_LARGE] else 'small'
         grab_thresh = GRAB_TOP_SMALL if brick_type == 'small' else GRAB_TOP_LARGE
 
-        err_x = target['cx'] - FRAME_CX
+        err_x = target['cx'] - CAM_CX
         yaw   = max(-YAW_MAX, min(YAW_MAX, err_x * YAW_KP))
 
         if target['y1'] > grab_thresh:
@@ -716,7 +757,7 @@ def step6_backup_and_realign(ep_chassis, ep_camera, detector, odom, tag_map, fwd
     x_err = obs_x - plan_x
     print(f"[realign] obstacle tag {nearest_tid} at x={obs_x:.2f}, correcting {x_err:+.3f}m")
     if abs(x_err) > 0.03:
-        crab_walk(ep_chassis, x_err)
+        crab_walk(ep_chassis, odom, x_err)
 
 
 # ── step 7: deliver lego to the correct goal zone ─────────────────────────────
@@ -727,9 +768,6 @@ def step7_deliver(ep_chassis, ep_arm, ep_gripper, ep_camera, detector, odom, tag
     2. Visual-servo forward toward the goal april tag (no rotation — crab for lateral).
     3. Stop GOAL_APPROACH_M from the tag.
     4. Drop lego, reverse back to SCAN_Y.
-
-    If we detected only one goal during scan, the other is inferred as the x-mirror
-    (goals are in opposite corners: inferred_x ≈ ARENA_M − known_x).
     """
     print(f"\n--- Step 7: Deliver {brick_type} lego ---")
 
@@ -764,7 +802,7 @@ def step7_deliver(ep_chassis, ep_arm, ep_gripper, ep_camera, detector, odom, tag
     plan_x, _ = get_plan_pos(odom)
     x_err = goal_x - plan_x
     if abs(x_err) > 0.02:
-        crab_walk(ep_chassis, x_err)
+        crab_walk(ep_chassis, odom, x_err)
 
     # 2. Forward approach with lateral fine-tuning using april tag visual servo
     print("[deliver] approaching goal tag...")
@@ -793,8 +831,11 @@ def step7_deliver(ep_chassis, ep_arm, ep_gripper, ep_camera, detector, odom, tag
         no_det = 0
         gt     = min(goal_tags, key=lambda t: t['dist'])
 
-        err_x    = float(gt['center'][0]) - FRAME_CX
+        err_x    = float(gt['center'][0]) - CAM_CX
         strafe_v = max(-STRAFE_MAX, min(STRAFE_MAX, -err_x * STRAFE_KP))
+
+        draw_apriltag(frame, gt, color=(0, 255, 0),
+                      extra=f"err={err_x:.0f}")
 
         if gt['dist'] <= GOAL_APPROACH_M + 0.02:
             stop(ep_chassis)
@@ -827,18 +868,9 @@ def step7_deliver(ep_chassis, ep_arm, ep_gripper, ep_camera, detector, odom, tag
 
 def step8_find_charger(ep_chassis, ep_camera, detector, odom, tag_map):
     """
-    Turn south at the current position (ideally near an obstacle tag x after
-    step 6/7 realignment).  The recharge tag faces north — it is readable when
-    the robot faces south and is north of the charger.
-
-    Updates tag_map in-place if charger is found.
-    Returns (plan_x, plan_y) of charger, or None.
-
-    Position math when facing south:
-      camera right = west = +plan_x
-      camera forward = south = −plan_y
-      tag_plan_x = plan_x + dist * sin(bear_rad)
-      tag_plan_y = plan_y − dist * cos(bear_rad)
+    Turn south at the current position. The recharge tag faces north — readable
+    when the robot faces south and is north of the charger.
+    Updates tag_map in-place. Returns (plan_x, plan_y) of charger, or None.
     """
     print("\n--- Step 8: Find charger ---")
 
@@ -847,14 +879,13 @@ def step8_find_charger(ep_chassis, ep_camera, detector, odom, tag_map):
             print(f"[charger] already mapped: tag {tid} at {tag_map[tid]}")
             return tag_map[tid]
 
-    # Strafe to nearest obstacle x before turning (better alignment)
     obs_tags = {tid: pos for tid, pos in tag_map.items() if tid not in TAGS_KNOWN}
     if obs_tags:
         plan_x, _ = get_plan_pos(odom)
         nearest = min(obs_tags, key=lambda t: abs(obs_tags[t][0] - plan_x))
         obs_x   = obs_tags[nearest][0]
         if abs(obs_x - plan_x) > 0.03:
-            crab_walk(ep_chassis, obs_x - plan_x)
+            crab_walk(ep_chassis, odom, obs_x - plan_x)
 
     rotate_to(ep_chassis, 180.0)
 
@@ -869,6 +900,7 @@ def step8_find_charger(ep_chassis, ep_camera, detector, odom, tag_map):
         rc_tags = [t for t in tags if t['id'] in TAGS_RECHARGE]
 
         for rt in rc_tags:
+            draw_apriltag(frame, rt, color=(0, 215, 255))
             plan_x, plan_y = get_plan_pos(odom)
             bear_rad = math.radians(rt['bearing'])
             tx = plan_x + rt['dist'] * math.sin(bear_rad)
@@ -883,7 +915,6 @@ def step8_find_charger(ep_chassis, ep_camera, detector, odom, tag_map):
         if charger_pos:
             break
 
-        # Small lateral sweep to widen view: right then left
         if sweep < 5:
             drive(ep_chassis, x=0.0, y=-0.05, z=0.0)
         elif sweep < 10:
@@ -902,8 +933,8 @@ def step8_find_charger(ep_chassis, ep_camera, detector, odom, tag_map):
 
 def step9_charge(ep_chassis, ep_camera, detector, battery, odom, tag_map):
     """
-    Navigate to charger position, align head-on facing south (tag faces north),
-    hold RECHARGE_HOLD_S seconds stationary, back up, face north.
+    Navigate to charger, align head-on facing south (tag faces north),
+    hold RECHARGE_HOLD_S seconds, back up, face north.
     """
     print("\n--- Step 9: Charge robot ---")
 
@@ -922,12 +953,10 @@ def step9_charge(ep_chassis, ep_camera, detector, battery, odom, tag_map):
 
     cx, _ = charger_pos
 
-    # Strafe to charger x while still facing north
     plan_x, _ = get_plan_pos(odom)
     if abs(cx - plan_x) > 0.02:
-        crab_walk(ep_chassis, cx - plan_x)
+        crab_walk(ep_chassis, odom, cx - plan_x)
 
-    # Face south to read the north-facing recharge tag
     rotate_to(ep_chassis, 180.0)
 
     print("[charge] approaching charger...")
@@ -946,6 +975,7 @@ def step9_charge(ep_chassis, ep_camera, detector, battery, odom, tag_map):
             continue
 
         rt   = rc_tags[0]
+        draw_apriltag(frame, rt, color=(0, 215, 255))
         dist = rt['dist']
         bear = rt['bearing']
 
@@ -976,7 +1006,7 @@ def step9_charge(ep_chassis, ep_camera, detector, battery, odom, tag_map):
 
 def main():
     (ep_robot, ep_chassis, ep_arm, ep_gripper,
-     ep_camera, model, detector, odom) = setup_robot()
+     ep_camera, detector, odom) = setup_robot()
 
     battery        = BatteryManager()
     tag_map        = {}    # {tag_id: (plan_x, plan_y)}
@@ -999,7 +1029,7 @@ def main():
             print(f"{'='*50}")
 
             brick_type, fwd_dist = step5_pick_lego(
-                ep_chassis, ep_arm, ep_gripper, ep_camera, model, odom)
+                ep_chassis, ep_arm, ep_gripper, ep_camera, odom)
 
             if brick_type is None:
                 print("[main] no lego found — ending run")
