@@ -16,8 +16,8 @@ from robomaster import robot, camera
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
-ROBOT_IP  = "192.168.50.116"
-ROBOT_SN  = "3JKCH8800100VW"
+ROBOT_IP  = "192.168.50.120"
+ROBOT_SN  = "3JKCH8800100AB"
 
 ARENA_M   = 3.048    # 10 ft arena side length (m)
 BOX_SIZE  = 0.26     # fabric box side (m)
@@ -26,7 +26,7 @@ BOX_SIZE  = 0.26     # fabric box side (m)
 START_X   = 2.85
 START_Y   = 0.15
 
-SCAN_Y    = 0.6     # horizontal scan / transit line y
+SCAN_Y    = 0.8     # horizontal scan / transit line y
 DOCK_X    = 0.4    # loading dock x (near west wall)
 
 # Loading dock plot bounds (plan-frame)
@@ -70,7 +70,7 @@ STRAFE_KP  = 0.002
 STRAFE_MAX = 0.12   # m/s cap for visual-servo strafe (drive_speed)
 CRAB_SPEED = 0.4   # m/s for chassis-move strafe (crab_walk)
 FWD_MAX    = 0.15
-FWD_SPEED  = 0.5
+FWD_SPEED  = 0.1
 SLOW_SPEED = 0.1
 TURN_SPEED = 20.0
 
@@ -100,44 +100,45 @@ GRIPPER_HOLD  = 1.0
 # ── global state ───────────────────────────────────────────────────────────────
 
 current_theta = 0.0   # degrees from north: 0 = north, 180 = south
+_odom_ref     = None  # global DeadReckoningOdom instance (set in setup_robot)
 _arm_pos      = None  # last known arm (x, y)
 _yolo_model   = None  # lazy-loaded only when picking up legos
 
 
-# ── odometry tracker ──────────────────────────────────────────────────────────
+# ── dead-reckoning odometry ───────────────────────────────────────────────────
 
-class OdometryTracker:
+class DeadReckoningOdom:
     """
-    Subscribes to chassis position + attitude callbacks.
-    cs=0 gives displacement in the robot's starting ground frame:
-      self.x = metres driven forward/north from start
-      self.y = metres strafed left/west  from start
+    Self-tracked dead-reckoning odometry — no SDK subscriptions.
+
+    Coordinate convention (matches the old OdometryTracker cs=0 frame):
+      self.x  = total forward displacement (m) in the robot-start ground frame.
+                Positive = the direction the arm faces (south by default).
+      self.y  = total lateral displacement (m).
+                Positive = left / west.
+      self.yaw = cumulative yaw (degrees, CCW positive, starts at 0).
+
+    Call update_move(dx, dy, dyaw) after every chassis.move() command.
+    Call update_drive_speed(vx, vy, dt) inside drive_speed loops.
     """
     def __init__(self):
-        self.x = self.y = self.yaw = 0.0
+        self.x   = 0.0
+        self.y   = 0.0
+        self.yaw = 0.0
         self._lock = threading.Lock()
 
-    def _pos_cb(self, pos_info):
-        x, y, _ = pos_info
+    def update_move(self, dx=0.0, dy=0.0, dyaw=0.0):
+        """Record an exact chassis.move() displacement."""
         with self._lock:
-            self.x = x
-            self.y = y
+            rad = math.radians(self.yaw)
+            # Rotate the body-frame displacement into the start ground frame
+            self.x   += dx * math.cos(rad) - dy * math.sin(rad)
+            self.y   += dx * math.sin(rad) + dy * math.cos(rad)
+            self.yaw += dyaw
 
-    def _att_cb(self, att_info):
-        yaw, _, _ = att_info
-        with self._lock:
-            self.yaw = yaw
-
-    def subscribe(self, ep_chassis):
-        ep_chassis.sub_position(cs=0, freq=20, callback=self._pos_cb)
-        ep_chassis.sub_attitude(freq=20, callback=self._att_cb)
-
-    def unsubscribe(self, ep_chassis):
-        for fn in (ep_chassis.unsub_position, ep_chassis.unsub_attitude):
-            try:
-                fn()
-            except Exception:
-                pass
+    def update_drive_speed(self, vx=0.0, vy=0.0, dt=0.0):
+        """Integrate a drive_speed command over a time interval dt."""
+        self.update_move(vx * dt, vy * dt, 0.0)
 
     def get_pose(self):
         with self._lock:
@@ -298,35 +299,40 @@ def stop(ep_chassis):
 
 
 def drive_straight(ep_chassis, dist_m, speed=None):
+    global _odom_ref
     if speed is None:
         speed = FWD_SPEED
     if abs(dist_m) < 0.005:
         return
     print(f"[drive] {dist_m:+.3f}m @ {speed:.2f}m/s")
-    # Positive dist_m = north; move x-axis is southward so negate.
     ep_chassis.move(x=dist_m, y=0, z=0, xy_speed=abs(speed)).wait_for_completed()
+    if _odom_ref is not None:
+        _odom_ref.update_move(dx=dist_m)
     time.sleep(0.12)
 
 
 def crab_walk(ep_chassis, dist_m, speed=None):
     """Strafe using chassis move command.
-    Positive dist_m = west (increase plan_x); negative = east.
-    drive_speed y<0 = west, so move y=-dist_m maps the same convention.
-    Uses ep_chassis.move() for accuracy — no external odom needed."""
+    Positive dist_m = west (increase plan_x); negative = east."""
+    global _odom_ref
     if abs(dist_m) < 0.005:
         return
     max_spd = min(abs(speed), CRAB_SPEED) if speed is not None else CRAB_SPEED
     print(f"[crab] {dist_m:+.3f}m @ {max_spd:.2f}m/s")
     ep_chassis.move(x=0, y=dist_m, z=0, xy_speed=max_spd).wait_for_completed()
+    if _odom_ref is not None:
+        _odom_ref.update_move(dy=dist_m)
     time.sleep(0.12)
 
 
 def rotate_by(ep_chassis, delta_deg):
-    global current_theta
+    global current_theta, _odom_ref
     if abs(delta_deg) < 0.3:
         return
     ep_chassis.move(x=0, y=0, z=delta_deg, z_speed=TURN_SPEED).wait_for_completed()
     current_theta = (current_theta + delta_deg) % 360
+    if _odom_ref is not None:
+        _odom_ref.update_move(dyaw=delta_deg)
     time.sleep(0.15)
 
 
@@ -341,16 +347,16 @@ def rotate_to(ep_chassis, target_deg):
 
 def get_plan_pos(odom):
     """
-    Convert cs=0 odometry to plan-frame (plan_x, plan_y).
-    Robot starts bottom-right, facing north (arm faces south toward loading dock).
-    ep_chassis.move(x=+d) drives arm-first (south); north requires move(x=-d).
-    Therefore odom.x is southward displacement: north travel → odom.x negative.
+    Convert dead-reckoning odometry to plan-frame (plan_x, plan_y).
+    Robot starts bottom-right (START_X, START_Y), arm faces south.
+    chassis.move(x=+d) drives arm-first (south) → odom.x increases southward.
+    chassis.move(y=+d) strafes left / west     → odom.y increases westward.
 
-    plan_x = west  from start = START_X + odom.y   (drive_speed y<0 = west → odom.y positive)
-    plan_y = north from start = START_Y - odom.x   (north → odom.x negative → -odom.x positive)
+    plan_x = west from bottom-right = START_X + odom.y
+    plan_y = north from bottom        = START_Y - odom.x
     """
     ox, oy, _ = odom.get_pose()
-    return START_X + ox, START_Y - oy
+    return START_X + oy, START_Y - ox
 
 
 # ── arm / gripper ─────────────────────────────────────────────────────────────
@@ -418,16 +424,16 @@ def setup_robot():
         ep_robot.close()
         sys.exit(1)
 
-    odom = OdometryTracker()
-    odom.subscribe(ep_chassis)
+    odom = DeadReckoningOdom()
+    global _odom_ref
+    _odom_ref = odom
 
     print("Robot ready. (YOLO loads on first lego pickup)\n")
     return ep_robot, ep_chassis, ep_arm, ep_gripper, ep_camera, detector, odom
 
 
 def shutdown_robot(ep_robot, ep_chassis, ep_camera, odom):
-    for fn in (lambda: odom.unsubscribe(ep_chassis),
-               lambda: stop(ep_chassis),
+    for fn in (lambda: stop(ep_chassis),
                lambda: ep_camera.stop_video_stream(),
                lambda: ep_robot.close()):
         try:
@@ -464,12 +470,21 @@ def step2_scan_and_map(ep_chassis, ep_camera, detector, odom):
     tag_map  = {}
     seen_ids = set()
 
-    drive(ep_chassis, x=0.0, y=-1*STRAFE_SCAN_SPD, z=0.0)  # strafe left = west
-    deadline = time.time() + 10
+    # Strafe west at constant speed; integrate velocity into odom
+    vy_cmd  = -STRAFE_SCAN_SPD   # negative y = west in drive_speed frame
+    drive(ep_chassis, x=0.0, y=vy_cmd, z=0.0)
+    t_prev  = time.time()
+    deadline = t_prev + 20
 
     while time.time() < deadline:
+        t_now   = time.time()
+        dt      = t_now - t_prev
+        t_prev  = t_now
+        odom.update_drive_speed(vx=0.0, vy=vy_cmd, dt=dt)
+
         plan_x, plan_y = get_plan_pos(odom)
         if plan_x >= ARENA_M - 0.10:
+            print("Reached west wall, breaking")
             break
 
         frame = get_frame(ep_camera)
@@ -504,6 +519,8 @@ def step2_scan_and_map(ep_chassis, ep_camera, detector, odom):
     stop(ep_chassis)
     time.sleep(0.2)
     print(f"[step2] done. found: {list(tag_map.keys())}")
+    for tid, (tx, ty) in tag_map.items():
+        print(f"Mapped tag {tid} at x: {tx:.2f}, y: {ty:.2f}")
     return tag_map
 
 
@@ -652,7 +669,9 @@ def step5_pick_lego(ep_chassis, ep_arm, ep_gripper, ep_camera, odom):
 
         t_now     = time.time()
         spd       = 0.06
-        fwd_dist += spd * (t_now - t_prev)
+        dt        = t_now - t_prev
+        fwd_dist += spd * dt
+        odom.update_drive_speed(vx=spd, vy=0.0, dt=dt)
         t_prev    = t_now
 
         drive(ep_chassis, x=spd, y=0.0, z=yaw)
@@ -712,7 +731,9 @@ def step5_pick_lego(ep_chassis, ep_arm, ep_gripper, ep_camera, odom):
 
         t_now     = time.time()
         spd       = 0.04
-        fwd_dist += spd * (t_now - t_prev)
+        dt        = t_now - t_prev
+        fwd_dist += spd * dt
+        odom.update_drive_speed(vx=spd, vy=0.0, dt=dt)
         t_prev    = t_now
 
         drive(ep_chassis, x=spd, y=0.0, z=yaw)
