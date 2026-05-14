@@ -16,25 +16,25 @@ from robomaster import robot, camera
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
-ROBOT_IP  = "192.168.50.111"
-ROBOT_SN  = "3JKCH88001009E"
+ROBOT_IP  = "192.168.50.116"
+ROBOT_SN  = "3JKCH8800100VW"
 
 ARENA_M   = 3.048    # 10 ft arena side length (m)
 BOX_SIZE  = 0.26     # fabric box side (m)
 
 # Plan-frame: origin = bottom-right corner, +x = west, +y = north
-START_X   = 0.05
-START_Y   = 0.05
+START_X   = 2.85
+START_Y   = 0.15
 
 SCAN_Y    = 0.6     # horizontal scan / transit line y
-DOCK_X    = 1.5     # loading dock x (near west wall)
+DOCK_X    = 0.4    # loading dock x (near west wall)
 
 # Loading dock plot bounds (plan-frame)
-DOCK_SW   = (1.75, 0.10)
-DOCK_NE   = (2.90, 0.80)
+DOCK_SW   = (0.25, 0.25)
+DOCK_NE   = (1.22, 0.91)
 
 # AprilTag IDs (tag36h11)
-TAGS_SMALL_GOAL = frozenset({11, 41})
+TAGS_SMALL_GOAL = frozenset({30, 41})
 TAGS_LARGE_GOAL = frozenset({45, 19})
 TAGS_RECHARGE   = frozenset({38, 34})
 TAGS_KNOWN      = TAGS_SMALL_GOAL | TAGS_LARGE_GOAL | TAGS_RECHARGE
@@ -67,21 +67,15 @@ BAT_WARN_LARGE = 45
 YAW_KP     = 0.15
 YAW_MAX    = 25.0
 STRAFE_KP  = 0.002
-STRAFE_MAX = 0.12
+STRAFE_MAX = 0.12   # m/s cap for visual-servo strafe (drive_speed)
+CRAB_SPEED = 0.4   # m/s for chassis-move strafe (crab_walk)
 FWD_MAX    = 0.15
-FWD_SPEED  = 0.10
-SLOW_SPEED = 0.05
-TURN_SPEED = 15.0
-
-# Proportional control for odometry-feedback driving
-DRIVE_KP     = 0.8    # forward/back proportional gain
-DRIVE_KP_YAW = 0.3    # heading-lock yaw correction gain during straight drive
-CRAB_KP      = 0.8    # strafe proportional gain
-CRAB_KP_YAW  = 0.3    # heading-lock yaw correction gain during strafe
-ODOM_TOL     = 0.015  # dead-zone: stop when error < 1.5 cm
+FWD_SPEED  = 0.5
+SLOW_SPEED = 0.1
+TURN_SPEED = 20.0
 
 # Strafe scan
-STRAFE_SCAN_SPD = 0.10   # m/s horizontal sweep speed
+STRAFE_SCAN_SPD = 0.8   # m/s horizontal sweep speed
 X_RECORD_TOL    = 15     # px: frame-center tolerance when logging a tag
 
 # Lego approach thresholds
@@ -93,7 +87,7 @@ GRAB_TOP_LARGE    = 120   # fine grab: bbox top > this (large lego)
 GOAL_APPROACH_M = 0.10   # stop this far from goal tag (m)
 
 # Recharge
-RECHARGE_CLOSE_M = 0.05
+RECHARGE_CLOSE_M = 0.08
 RECHARGE_HOLD_S  = 5.2
 
 # Arm (x mm forward from body, y mm vertical)
@@ -309,32 +303,22 @@ def drive_straight(ep_chassis, dist_m, speed=None):
     if abs(dist_m) < 0.005:
         return
     print(f"[drive] {dist_m:+.3f}m @ {speed:.2f}m/s")
+    # Positive dist_m = north; move x-axis is southward so negate.
     ep_chassis.move(x=dist_m, y=0, z=0, xy_speed=abs(speed)).wait_for_completed()
     time.sleep(0.12)
 
 
-def crab_walk(ep_chassis, odom, dist_m, speed=None):
-    """Strafe with odometry proportional control and heading lock.
-    Positive = left/west when facing north."""
+def crab_walk(ep_chassis, dist_m, speed=None):
+    """Strafe using chassis move command.
+    Positive dist_m = west (increase plan_x); negative = east.
+    drive_speed y<0 = west, so move y=-dist_m maps the same convention.
+    Uses ep_chassis.move() for accuracy — no external odom needed."""
     if abs(dist_m) < 0.005:
         return
-    max_spd = min(abs(speed), STRAFE_MAX) if speed is not None else STRAFE_MAX
-    print(f"[crab] {dist_m:+.3f}m (proportional, max={max_spd:.2f}m/s)")
-    _, oy0, yaw0 = odom.get_pose()
-    target_oy = oy0 + dist_m
-    deadline = time.time() + max(abs(dist_m) / 0.03 + 3.0, 10.0)
-    while time.time() < deadline:
-        _, oy, yaw = odom.get_pose()
-        err_y   = target_oy - oy
-        err_yaw = yaw - yaw0
-        if abs(err_y) < ODOM_TOL:
-            break
-        cmd_y = max(-max_spd, min(max_spd, err_y * CRAB_KP))
-        cmd_z = max(-YAW_MAX, min(YAW_MAX, -err_yaw * CRAB_KP_YAW))
-        ep_chassis.drive_speed(x=0.0, y=cmd_y, z=cmd_z)
-        time.sleep(0.02)
-    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0)
-    time.sleep(0.1)
+    max_spd = min(abs(speed), CRAB_SPEED) if speed is not None else CRAB_SPEED
+    print(f"[crab] {dist_m:+.3f}m @ {max_spd:.2f}m/s")
+    ep_chassis.move(x=0, y=dist_m, z=0, xy_speed=max_spd).wait_for_completed()
+    time.sleep(0.12)
 
 
 def rotate_by(ep_chassis, delta_deg):
@@ -358,11 +342,15 @@ def rotate_to(ep_chassis, target_deg):
 def get_plan_pos(odom):
     """
     Convert cs=0 odometry to plan-frame (plan_x, plan_y).
-    plan_x = west  from start = START_X + odom.y  (odom.y = left/west displacement)
-    plan_y = north from start = START_Y + odom.x  (odom.x = forward/north displacement)
+    Robot starts bottom-right, facing north (arm faces south toward loading dock).
+    ep_chassis.move(x=+d) drives arm-first (south); north requires move(x=-d).
+    Therefore odom.x is southward displacement: north travel → odom.x negative.
+
+    plan_x = west  from start = START_X + odom.y   (drive_speed y<0 = west → odom.y positive)
+    plan_y = north from start = START_Y - odom.x   (north → odom.x negative → -odom.x positive)
     """
     ox, oy, _ = odom.get_pose()
-    return START_X + oy, START_Y + ox
+    return START_X + ox, START_Y - oy
 
 
 # ── arm / gripper ─────────────────────────────────────────────────────────────
@@ -477,7 +465,7 @@ def step2_scan_and_map(ep_chassis, ep_camera, detector, odom):
     seen_ids = set()
 
     drive(ep_chassis, x=0.0, y=-1*STRAFE_SCAN_SPD, z=0.0)  # strafe left = west
-    deadline = time.time() + 35
+    deadline = time.time() + 10
 
     while time.time() < deadline:
         plan_x, plan_y = get_plan_pos(odom)
@@ -535,8 +523,8 @@ def step3_plot_map(tag_map):
     ax.set_ylim(-0.2, ARENA_M + 0.2)
     ax.set_aspect('equal')
     ax.set_title("Lab 3 Arena Map")
-    ax.set_xlabel("plan x (m)  [east=0 → west]")
-    ax.set_ylabel("plan y (m)  [south=0 → north]")
+    ax.set_xlabel("x (m)")
+    ax.set_ylabel("y (m)")
     ax.grid(True, alpha=0.3)
 
     # Arena outline
@@ -585,8 +573,6 @@ def step3_plot_map(tag_map):
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arena_map.png")
     plt.savefig(out)
     print(f"[step3] map saved → {out}")
-    plt.show(block=False)
-    plt.pause(3)
 
 
 # ── step 4: go to loading dock position ──────────────────────────────────────
@@ -601,12 +587,12 @@ def step4_go_to_dock(ep_chassis, odom):
 
     y_err = SCAN_Y - plan_y
     if abs(y_err) > 0.02:
-        drive_straight(ep_chassis, odom, y_err)
+        drive_straight(ep_chassis, y_err)
 
     plan_x, _ = get_plan_pos(odom)
     x_err = DOCK_X - plan_x
     if abs(x_err) > 0.02:
-        crab_walk(ep_chassis, odom, x_err)
+        crab_walk(ep_chassis, x_err)
 
     print(f"[step4] at plan {get_plan_pos(odom)}")
 
@@ -620,7 +606,7 @@ def step5_pick_lego(ep_chassis, ep_arm, ep_gripper, ep_camera, odom):
     """
     print("\n--- Step 5: Pick lego ---")
     rotate_to(ep_chassis, 180.0)
-    arm_moveto(ep_arm, ARM_HOME, "pre-pick")
+    arm_moveto(ep_arm, ARM_PICKUP, "pre-pick")
     gripper_open(ep_gripper)
 
     brick_type = None
@@ -743,7 +729,7 @@ def step6_backup_and_realign(ep_chassis, ep_camera, detector, odom, tag_map, fwd
     to the nearest obstacle tag's x to correct lateral drift from the pickup.
     """
     print(f"\n--- Step 6: Back up {fwd_dist:.2f} m and realign ---")
-    drive_straight(ep_chassis, -fwd_dist, speed=SLOW_SPEED)
+    drive_straight(ep_chassis, fwd_dist, speed=SLOW_SPEED)   # positive = north (back to scan line)
     rotate_to(ep_chassis, 0.0)
 
     obs_tags = {tid: pos for tid, pos in tag_map.items() if tid not in TAGS_KNOWN}
@@ -757,7 +743,7 @@ def step6_backup_and_realign(ep_chassis, ep_camera, detector, odom, tag_map, fwd
     x_err = obs_x - plan_x
     print(f"[realign] obstacle tag {nearest_tid} at x={obs_x:.2f}, correcting {x_err:+.3f}m")
     if abs(x_err) > 0.03:
-        crab_walk(ep_chassis, odom, x_err)
+        crab_walk(ep_chassis, x_err)
 
 
 # ── step 7: deliver lego to the correct goal zone ─────────────────────────────
@@ -802,7 +788,7 @@ def step7_deliver(ep_chassis, ep_arm, ep_gripper, ep_camera, detector, odom, tag
     plan_x, _ = get_plan_pos(odom)
     x_err = goal_x - plan_x
     if abs(x_err) > 0.02:
-        crab_walk(ep_chassis, odom, x_err)
+        crab_walk(ep_chassis, x_err)
 
     # 2. Forward approach with lateral fine-tuning using april tag visual servo
     print("[deliver] approaching goal tag...")
@@ -885,7 +871,7 @@ def step8_find_charger(ep_chassis, ep_camera, detector, odom, tag_map):
         nearest = min(obs_tags, key=lambda t: abs(obs_tags[t][0] - plan_x))
         obs_x   = obs_tags[nearest][0]
         if abs(obs_x - plan_x) > 0.03:
-            crab_walk(ep_chassis, odom, obs_x - plan_x)
+            crab_walk(ep_chassis, obs_x - plan_x)
 
     rotate_to(ep_chassis, 180.0)
 
@@ -955,7 +941,7 @@ def step9_charge(ep_chassis, ep_camera, detector, battery, odom, tag_map):
 
     plan_x, _ = get_plan_pos(odom)
     if abs(cx - plan_x) > 0.02:
-        crab_walk(ep_chassis, odom, cx - plan_x)
+        crab_walk(ep_chassis, cx - plan_x)
 
     rotate_to(ep_chassis, 180.0)
 
@@ -988,7 +974,7 @@ def step9_charge(ep_chassis, ep_camera, detector, battery, odom, tag_map):
             print(f"[charge] holding {RECHARGE_HOLD_S}s (dist={dist:.3f}m)")
             time.sleep(RECHARGE_HOLD_S)
             battery.recharge()
-            drive_straight(ep_chassis, -0.35, speed=SLOW_SPEED)
+            drive_straight(ep_chassis, 0.35, speed=SLOW_SPEED)   # positive = north (away from charger)
             rotate_to(ep_chassis, 0.0)
             print("[charge] complete")
             return True
@@ -1075,11 +1061,6 @@ def main():
         traceback.print_exc()
     finally:
         shutdown_robot(ep_robot, ep_chassis, ep_camera, odom)
-        plt.ioff()
-        try:
-            plt.show()
-        except Exception:
-            pass
 
 
 if __name__ == "__main__":
